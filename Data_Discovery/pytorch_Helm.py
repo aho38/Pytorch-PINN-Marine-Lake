@@ -1,3 +1,6 @@
+__author__ = "Ho, Alex"
+__credits__ = ["Raissi, Maziar", "Bhustali, Prateek"]
+
 import torch
 import torch.nn as nn
 import numpy as np
