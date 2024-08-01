@@ -111,15 +111,34 @@ class PINN(nn.Module):
 
     def train(self, x_u, u_true, x_f, k, epochs, lr):
         # adam optimizer
-        optimizer = torch.optim.Adam(self.parameters(), lr=lr,betas=(0.9, 0.999), eps=1e-07)
-        for epoch in range(epochs): # loop over the dataset multiple times
+        # optimizer = torch.optim.Adam(self.parameters(), lr=lr,betas=(0.9, 0.999), eps=1e-07)
+        optimizer = torch.optim.LBFGS(self.parameters(), lr=lr, max_iter=20, tolerance_grad=1e-05, tolerance_change=1e-09, history_size=100, line_search_fn="strong_wolfe")
+
+        def closure():
             optimizer.zero_grad()
             loss, loss_u, loss_f = self.compute_loss(x_u, u_true, x_f, k)
             loss.backward()
-            optimizer.step()
+            return loss
+
+        for epoch in range(epochs): # loop over the dataset multiple times
+            optimizer.zero_grad()
+            # start_time = time.time()
+            loss, loss_u, loss_f = self.compute_loss(x_u, u_true, x_f, k)
+            # loss.backward()
+            # optimizer.step()
+            # print('Training time: {:.4f} seconds'.format(time.time() - start_time))
+            optimizer.step(closure)
             
             if epoch % 100 == 0: # Print the loss every 100 epochs
-                print(f"Epoch {epoch}, loss_BC: {loss_u.item():.5f}, loss_f: {loss_f.item():.5f}, loss: {loss.item():.5f}")
+                print(f"Epoch {epoch}, loss_BC: {loss_u.item():1.3e}, loss_f: {loss_f.item():1.3e}, loss: {loss.item():1.3e}")
+            # if epoch % 300 == 0:
+            #     x_test = np.hstack((X.flatten(order='F')[:,None], Y.flatten(order='F')[:,None]))
+            #     x_test_tensor = torch.from_numpy(x_test).float()
+
+            #     u = model.forward(x_test_tensor)
+            #     u_pred = np.reshape(u.detach().numpy(), (Nx,Nx), order='F')
+            #     plt.pcolor(X, Y, u_pred, cmap='jet')
+            #     plt.show()
     
 
 
