@@ -49,6 +49,7 @@ class PINN(nn.Module):
     def __init__(self, layers):
         super(PINN, self).__init__()
         self.layers = layers
+        self.num_layers = len(layers)
         self.loss_function = nn.MSELoss()
 
         # Neural Network
@@ -74,8 +75,15 @@ class PINN(nn.Module):
         b_ = torch.tensor(b, dtype=torch.float32)
         #preprocessing input 
         x = (x - a_)/(b_ - a_) #feature scaling
-        for linear in self.linears[:-1]:
+        
+        identity1 = self.linears[0](x)
+        identity2 = self.linears[1](identity1)
+        for i, linear in enumerate(self.linears[:-1]):
             x = self.activation(linear(x))
+            if i == self.num_layers - 2:
+                x += identity2
+            elif i == self.num_layers -1:
+                x += identity1
         x = self.linears[-1](x)  # No activation on the last layer (u)
         return x
     
@@ -85,8 +93,15 @@ class PINN(nn.Module):
         b_ = torch.tensor(b, dtype=torch.float32)
         #preprocessing input 
         x = (x - a_)/(b_ - a_) #feature scaling
-        for linear in self.linears_m[:-1]:
+        
+        identity1 = self.linears_m[0](x)
+        identity2 = self.linears_m[1](identity1)
+        for i, linear in enumerate(self.linears_m[:-1]):
             x = self.activation(linear(x))
+            if i == self.num_layers - 2:
+                x += identity2
+            elif i == self.num_layers - 1:
+                x += identity1
         x = self.linears_m[-1](x)  # No activation on the last layer (u)
         return x
     
@@ -127,7 +142,7 @@ class PINN(nn.Module):
             loss.backward()
             optimizer.step()
             
-            if epoch % 100 == 0: # Print the loss every 100 epochs
+            if epoch % 500 == 0: # Print the loss every 100 epochs
                 print(f"Epoch {epoch}, loss_misfit: {loss_u.item():1.2e}, loss_f: {loss_f.item():1.2e}, loss: {loss.item():1.2e}")
                 # print(f"Epoch {epoch}, loss_misfit: {loss_u.item():1.2e}, loss_f: {loss_f.item():1.2e}, loss: {loss.item():1.2e} , exp(m): {np.exp(self.m.item()):.5f}")
 
@@ -138,58 +153,101 @@ class PINN(nn.Module):
 layers = [1, 50, 50, 50, 50, 50, 50, 1]
 model = PINN(layers)
 model.to(device)
-epochs = 1000
+epochs = 100
 learning_rate = 1e-4
 
 start_time = time.time()
 model.train(X_u_train, u_train, X_f_train, epochs, learning_rate)
-print('Training time: {:.4f} minutes'.format((time.time() - start_time)/60))
+Adam_time = time.time() - start_time
+print('Training time: {:.4f} seconds'.format((Adam_time)))
 
 ## L-BFGS
+start_time1 = time.time()
 optimizer = torch.optim.LBFGS(model.parameters(), lr=learning_rate, max_iter=50000, tolerance_grad=1e-05, tolerance_change=1e-09, history_size=100, line_search_fn="strong_wolfe")
 def closure():
     optimizer.zero_grad()
     loss, loss_u, loss_f = model.compute_loss(X_u_train, u_train, X_f_train)
     loss.backward()
     return loss
-for lbfgs_iter in range(1):
+for lbfgs_iter in range(10):
     optimizer.step(closure)
     loss, loss_u, loss_f = model.compute_loss(X_u_train, u_train, X_f_train)
     print(f"LBFGS: Loss_misfit: {loss_u.item():1.2e}, loss_f: {loss_f.item():1.2e}, loss: {loss.item():1.2e}")
     # print(f"LBFGS: Loss_misfit: {loss_u.item():1.2e}, loss_f: {loss_f.item():1.2e}, loss: {loss.item():1.2e} , exp(m): {np.exp(model.m.item()):.5f}")
 
+start_time1 = time.time()
+## L-BFGS
+optimizer = torch.optim.LBFGS(model.parameters(), lr=1, tolerance_grad=1e-10, history_size=100, line_search_fn="strong_wolfe")
+def closure():
+    optimizer.zero_grad()
+    loss, loss_u, loss_f = model.compute_loss(X_u_train, u_train, X_f_train)
+    loss.backward()
+    return loss
+for lbfgs_iter in range(10):
+    optimizer.step(closure)
+    loss, loss_u, loss_f = model.compute_loss(X_u_train, u_train, X_f_train)
+    print(f"LBFGS: Loss_misfit: {loss_u.item():1.2e}, loss_f: {loss_f.item():1.2e}, loss: {loss.item():1.2e}")
+    # print(f"LBFGS: Loss_misfit: {loss_u.item():1.2e}, loss_f: {loss_f.item():1.2e}, loss: {loss.item():1.2e} , exp(m): {np.exp(model.m.item()):.5f}")
+LBFGS_time = time.time() - start_time1
+print('LBFGS time: {:.4f} seconds'.format((LBFGS_time)))
+
+
 u = model.forward(X_u_train)
 m = model.m_compute(X_u_train)
 
-import matplotlib.pyplot as plt
+## ===================== save model =====================
+import sys
+import json
+from utils import increment_path
 
-# error, error_label = np.sqrt(nmse(np.exp(m.compute_vertex_values()),  np.exp(mtrue_array))), 'NRMSE'
-fig, ax = plt.subplots(nrows=1, ncols=3, figsize=(15, 3.6)) 
-ax[0].plot(X_u_train.cpu(),u_train.cpu(), '-', label=f'$u_d$: $n_x = {Nu}$', markersize=2, linewidth=2.5)
-ax[0].plot(X_u_train.cpu(),u.detach().cpu(), '--', label=r'$u_{sol}$', markersize=2, linewidth=2.5)
-# ax[0].plot(x, u_analytic, 'o', label=r'$A\sin(2\pi x)$', markersize=2, linewidth=2.5)
-ax[0].set_xlabel(r'$x$')
-ax[0].set_ylabel(r'$u$')
-ax[0].set_title(f'Data $u_d$ vs. Solution $u$: MSE = {loss_u.item():1.2e}', fontsize=15)
-ax[0].grid()
-ax[0].legend(fontsize=12)
-ax[1].plot(x_array, mtrue_array, '-', label=r'$m_{true}$', color='tab:blue', linewidth=2.5)
-# ax[1].plot(X_u_train,np.ones(Nu), '-', label=r'$m_{true}$', color='tab:blue', linewidth=2.5)
-ax[1].plot(X_u_train.cpu(),m.detach().cpu(), '--', label=r'$m_{sol}$', color='tab:red', linewidth=2.5)
-# ax[1].set_title(f'gamma = {gamma[kappa_min_ind]:.3e}')
-ax[1].set_xlabel(r'$x$')
-ax[1].set_ylabel(r'$m$')
-ax[1].set_title(f'Recovered vs. True Param', fontsize=15)
-ax[1].grid()
-ax[1].legend(fontsize=12)
+dir_name = "PINN_results"
+path_ = f'./log/{dir_name}'
+save_path = increment_path(path_, mkdir=True)
 
-ax[2].plot(X_u_train.cpu(), abs(u_train.cpu() - u.detach().cpu()))
-# ax[2].plot(x, run.g_sun.compute_vertex_values())
-ax[2].set_title(f'Data Misfit: \n $|u - u_d|$', fontsize=15)
-ax[2].set_xlabel(r'$x$')
-ax[2].set_ylabel(r'$|u_{sol} - u_d|$')
-ax[2].grid()
+# define results dict
+results = {
+    'adam_runtime': Adam_time,
+    'lbfgs_runtime': LBFGS_time,
+    'x_u_train': X_u_train.cpu().tolist(),
+    'u_train': u_train.cpu().tolist(),
+    'u_sol': u.detach().cpu().tolist(),
+    'm_sol': m.detach().cpu().tolist(),
+    'x_for_m_true': x_array.tolist(),
+    'm_true': mtrue_array.tolist(),
+}
 
-print(f'MSE = {torch.mean((u_train.cpu() - u.detach().cpu())**2)}')
-# plt.savefig('Helm.png', dpi=300)
-plt.show()
+# save results and model
+with open(f'{save_path}/results.json', 'w') as f:
+    json.dump(results, f, indent=2)
+torch.save(model.state_dict(),f'{save_path}/model.pt')
+
+# import matplotlib.pyplot as plt
+
+# fig, ax = plt.subplots(nrows=1, ncols=3, figsize=(15, 3.6)) 
+# ax[0].plot(X_u_train.cpu(),u_train.cpu(), '-', label=f'$u_d$: $n_x = {Nu}$', markersize=2, linewidth=2.5)
+# ax[0].plot(X_u_train.cpu(),u.detach().cpu(), '--', label=r'$u_{sol}$', markersize=2, linewidth=2.5)
+# ax[0].set_xlabel(r'$x$')
+# ax[0].set_ylabel(r'$u$')
+# ax[0].set_title(f'Data $u_d$ vs. Solution $u$: MSE = {loss_u.item():1.2e}', fontsize=15)
+# ax[0].grid()
+# ax[0].legend(fontsize=12)
+# ax[1].plot(x_array, mtrue_array, '-', label=r'$m_{true}$', color='tab:blue', linewidth=2.5)
+# # ax[1].plot(X_u_train,np.ones(Nu), '-', label=r'$m_{true}$', color='tab:blue', linewidth=2.5)
+# ax[1].plot(X_u_train.cpu(),m.detach().cpu(), '--', label=r'$m_{sol}$', color='tab:red', linewidth=2.5)
+# # ax[1].set_title(f'gamma = {gamma[kappa_min_ind]:.3e}')
+# ax[1].set_xlabel(r'$x$')
+# ax[1].set_ylabel(r'$m$')
+# ax[1].set_title(f'Recovered vs. True Param', fontsize=15)
+# ax[1].grid()
+# ax[1].legend(fontsize=12)
+
+# ax[2].plot(X_u_train.cpu(), abs(u_train.cpu() - u.detach().cpu()))
+# # ax[2].plot(x, run.g_sun.compute_vertex_values())
+# ax[2].set_title(f'Data Misfit: \n $|u - u_d|$', fontsize=15)
+# ax[2].set_xlabel(r'$x$')
+# ax[2].set_ylabel(r'$|u_{sol} - u_d|$')
+# ax[2].grid()
+
+# print(f'MSE = {torch.mean((u_train.cpu() - u.detach().cpu())**2)}')
+# # plt.savefig('Helm.png', dpi=300)
+# plt.show()
