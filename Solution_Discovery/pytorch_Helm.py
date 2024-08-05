@@ -52,12 +52,7 @@ def get_training_data(N_u, N_f):
 
     return torch.tensor(X_f, dtype=torch.float32), torch.tensor(x_u_train, dtype=torch.float32), torch.tensor(u_train, dtype=torch.float32)
 
-# Number of Data Points and Collocation Points
-N_u = 400
-N_f = 10000
 
-# Get the training data
-X_f_train, X_u_train, u_train = get_training_data(N_u, N_f)
 
 ## Define PINN model
 class PINN(nn.Module):
@@ -141,6 +136,12 @@ class PINN(nn.Module):
             #     plt.show()
     
 
+# Number of Data Points and Collocation Points
+N_u = 400
+N_f = 10000
+
+# Get the training data
+X_f_train, X_u_train, u_train = get_training_data(N_u, N_f)
 
 # PINN Setup and Training
 layers = [2, 50, 50, 50, 1]
