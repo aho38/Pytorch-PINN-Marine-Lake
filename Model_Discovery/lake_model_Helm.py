@@ -76,14 +76,14 @@ class PINN(nn.Module):
         #preprocessing input 
         x = (x - a_)/(b_ - a_) #feature scaling
         
-        identity1 = self.linears[0](x)
-        identity2 = self.linears[1](identity1)
+        # identity1 = self.linears[0](x)
+        # identity2 = self.linears[1](identity1)
         for i, linear in enumerate(self.linears[:-1]):
             x = self.activation(linear(x))
-            if i == self.num_layers - 2:
-                x += identity2
-            elif i == self.num_layers -1:
-                x += identity1
+            # if i == self.num_layers - 2:
+            #     x += identity2
+            # elif i == self.num_layers -1:
+            #     x += identity1
         x = self.linears[-1](x)  # No activation on the last layer (u)
         return x
     
@@ -94,14 +94,14 @@ class PINN(nn.Module):
         #preprocessing input 
         x = (x - a_)/(b_ - a_) #feature scaling
         
-        identity1 = self.linears_m[0](x)
-        identity2 = self.linears_m[1](identity1)
+        # identity1 = self.linears_m[0](x)
+        # identity2 = self.linears_m[1](identity1)
         for i, linear in enumerate(self.linears_m[:-1]):
             x = self.activation(linear(x))
-            if i == self.num_layers - 2:
-                x += identity2
-            elif i == self.num_layers - 1:
-                x += identity1
+            # if i == self.num_layers - 2:
+            #     x += identity2
+            # elif i == self.num_layers - 1:
+            #     x += identity1
         x = self.linears_m[-1](x)  # No activation on the last layer (u)
         return x
     
@@ -219,7 +219,7 @@ results = {
 # save results and model
 with open(f'{save_path}/results.json', 'w') as f:
     json.dump(results, f, indent=2)
-torch.save(model.state_dict(),f'{save_path}/model.pt')
+torch.save(model,f'{save_path}/model.pt')
 
 # import matplotlib.pyplot as plt
 
