@@ -153,7 +153,7 @@ class PINN(nn.Module):
 layers = [1, 50, 50, 50, 50, 50, 50, 1]
 model = PINN(layers)
 model.to(device)
-epochs = 100
+epochs = 1000000
 learning_rate = 1e-4
 
 start_time = time.time()
@@ -201,7 +201,7 @@ import json
 from utils import increment_path
 
 dir_name = "PINN_results"
-path_ = f'./log/{dir_name}'
+path_ = f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/{dir_name}'
 save_path = increment_path(path_, mkdir=True)
 
 # define results dict
