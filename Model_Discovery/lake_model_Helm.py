@@ -4,6 +4,7 @@ import numpy as np
 import time
 import pandas as pd
 import os
+from copy import deepcopy
 from pyDOE import lhs # Latin Hypercube Sampling
 
 # Check if CUDA is available, otherwise use CPU
@@ -139,11 +140,17 @@ class PINN(nn.Module):
         optimizer = torch.optim.Adam(self.parameters(), lr=lr,betas=(0.9, 0.999), eps=1e-07)
         
         start_time = time.time()
+        best_loss = 1e10
         for epoch in range(epochs): # loop over the dataset multiple times
             optimizer.zero_grad()
             loss, loss_u, loss_f = self.compute_loss(x_u, u_true, x_f)
             loss.backward()
             optimizer.step()
+
+            if loss < best_loss:
+                best_loss = loss
+                self.best_model = deepcopy(self.state_dict())
+                self.best_u, self.best_m = self.forward(x_u)
             
             if (epoch+1) % 500 == 0: # Print the loss every 100 epochs
                 end_time = time.time()
@@ -157,27 +164,13 @@ class PINN(nn.Module):
 layers = [1, 50, 50, 50, 50, 50, 50, 1]
 model = PINN(layers)
 model.to(device)
-epochs = 500000
+epochs = 1000
 learning_rate = 1e-4
 
 start_time = time.time()
 model.train(X_u_train, u_train, X_f_train, epochs, learning_rate)
 Adam_time = time.time() - start_time
 print('Training time: {:.4f} seconds'.format((Adam_time)))
-
-## L-BFGS
-start_time1 = time.time()
-optimizer = torch.optim.LBFGS(model.parameters(), lr=learning_rate, max_iter=50000, tolerance_grad=1e-05, tolerance_change=1e-09, history_size=100, line_search_fn="strong_wolfe")
-def closure():
-    optimizer.zero_grad()
-    loss, _, _ = model.compute_loss(X_u_train, u_train, X_f_train)
-    loss.backward()
-    return loss
-for lbfgs_iter in range(10):
-    optimizer.step(closure)
-    loss, loss_u, loss_f = model.compute_loss(X_u_train, u_train, X_f_train)
-    print(f"LBFGS: Loss_misfit: {loss_u.item():1.2e}, loss_f: {loss_f.item():1.2e}, loss: {loss.item():1.2e}")
-    # print(f"LBFGS: Loss_misfit: {loss_u.item():1.2e}, loss_f: {loss_f.item():1.2e}, loss: {loss.item():1.2e} , exp(m): {np.exp(model.m.item()):.5f}")
 
 start_time1 = time.time()
 ## L-BFGS
@@ -196,7 +189,8 @@ LBFGS_time = time.time() - start_time1
 print('LBFGS time: {:.4f} seconds'.format((LBFGS_time)))
 
 
-u, m = model.forward(X_u_train)
+# u, m = model.forward(X_u_train)
+u, m = model.best_u, model.best_m
 
 ## ===================== save model =====================
 import sys
