@@ -164,7 +164,7 @@ class PINN(nn.Module):
 layers = [1, 50, 50, 50, 50, 50, 50, 1]
 model = PINN(layers)
 model.to(device)
-epochs = 1000
+epochs = 1000000
 learning_rate = 1e-4
 
 start_time = time.time()
