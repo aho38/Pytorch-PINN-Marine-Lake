@@ -40,6 +40,7 @@ forcing_f_train = torch.tensor(true_forcing(X_f_train), dtype=torch.float32)
 X_u_train = X_u_train.to(device)
 u_train = u_train.to(device)
 X_f_train = X_f_train.to(device)
+X_f_train.requires_grad = True
 dist_f_train = dist_f_train.to(device)
 forcing_f_train = forcing_f_train.to(device)
 
@@ -75,7 +76,10 @@ class PINN(nn.Module):
         b_ = torch.tensor(b, dtype=torch.float32)
         #preprocessing input 
         x = (x - a_)/(b_ - a_) #feature scaling
-        
+        # compute m first
+        x_copy = x.clone()
+        m = self.m_compute(x_copy)
+
         # identity1 = self.linears[0](x)
         # identity2 = self.linears[1](identity1)
         for i, linear in enumerate(self.linears[:-1]):
@@ -85,14 +89,13 @@ class PINN(nn.Module):
             # elif i == self.num_layers -1:
             #     x += identity1
         x = self.linears[-1](x)  # No activation on the last layer (u)
-        return x
+        return x, m
     
     def m_compute(self, x):
         # print(x.shape)
         a_ = torch.tensor(a, dtype=torch.float32)
         b_ = torch.tensor(b, dtype=torch.float32)
         #preprocessing input 
-        x = (x - a_)/(b_ - a_) #feature scaling
         
         # identity1 = self.linears_m[0](x)
         # identity2 = self.linears_m[1](identity1)
@@ -108,8 +111,7 @@ class PINN(nn.Module):
     def compute_loss(self, x_u, u_true, x_f):
         x_f.requires_grad = True
         # Calculate u from the network at boundary points and collocation points
-        u_f_pred = self.forward(x_f)
-        m_pred = self.m_compute(x_f)
+        u_f_pred, m_pred = self.forward(x_f)
         
         # Compute f (similar to TensorFlow implementation)
         u_f_pred_grads = torch.autograd.grad(u_f_pred, x_f, grad_outputs=torch.ones_like(u_f_pred), retain_graph=True, create_graph=True)[0]
@@ -124,7 +126,7 @@ class PINN(nn.Module):
         
         # Calculate the loss
         loss_f = self.loss_function(f_pred, torch.zeros_like(f_pred)) # residual loss
-        u_pred = self.forward(x_u)
+        u_pred, _ = self.forward(x_u)
         loss_u = self.loss_function(u_pred, u_true) # boundary loss
         loss = loss_f + loss_u
 
@@ -135,16 +137,18 @@ class PINN(nn.Module):
         self.to(device) 
         # adam optimizer
         optimizer = torch.optim.Adam(self.parameters(), lr=lr,betas=(0.9, 0.999), eps=1e-07)
-
+        
+        start_time = time.time()
         for epoch in range(epochs): # loop over the dataset multiple times
             optimizer.zero_grad()
             loss, loss_u, loss_f = self.compute_loss(x_u, u_true, x_f)
             loss.backward()
             optimizer.step()
             
-            if epoch % 500 == 0: # Print the loss every 100 epochs
-                print(f"Epoch {epoch}, loss_misfit: {loss_u.item():1.2e}, loss_f: {loss_f.item():1.2e}, loss: {loss.item():1.2e}")
-                # print(f"Epoch {epoch}, loss_misfit: {loss_u.item():1.2e}, loss_f: {loss_f.item():1.2e}, loss: {loss.item():1.2e} , exp(m): {np.exp(self.m.item()):.5f}")
+            if (epoch+1) % 500 == 0: # Print the loss every 100 epochs
+                end_time = time.time()
+                print(f"Epoch {(epoch+1)}, loss_misfit: {loss_u.item():1.2e}, loss_f: {loss_f.item():1.2e}, loss: {loss.item():1.2e}, run time: {start_time - end_time}s")
+                start_time = time.time()
 
 
 
@@ -153,7 +157,7 @@ class PINN(nn.Module):
 layers = [1, 50, 50, 50, 50, 50, 50, 1]
 model = PINN(layers)
 model.to(device)
-epochs = 1000000
+epochs = 500000
 learning_rate = 1e-4
 
 start_time = time.time()
@@ -166,7 +170,7 @@ start_time1 = time.time()
 optimizer = torch.optim.LBFGS(model.parameters(), lr=learning_rate, max_iter=50000, tolerance_grad=1e-05, tolerance_change=1e-09, history_size=100, line_search_fn="strong_wolfe")
 def closure():
     optimizer.zero_grad()
-    loss, loss_u, loss_f = model.compute_loss(X_u_train, u_train, X_f_train)
+    loss, _, _ = model.compute_loss(X_u_train, u_train, X_f_train)
     loss.backward()
     return loss
 for lbfgs_iter in range(10):
@@ -192,8 +196,7 @@ LBFGS_time = time.time() - start_time1
 print('LBFGS time: {:.4f} seconds'.format((LBFGS_time)))
 
 
-u = model.forward(X_u_train)
-m = model.m_compute(X_u_train)
+u, m = model.forward(X_u_train)
 
 ## ===================== save model =====================
 import sys
