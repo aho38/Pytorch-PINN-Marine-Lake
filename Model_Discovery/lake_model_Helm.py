@@ -33,6 +33,10 @@ omega = torch.tensor(omega, dtype=torch.float32, device=device)
 
 X_u_train = torch.linspace(a,b, Nu, dtype=torch.float32)[:, None]
 u_train = torch.tensor(true_solution(X_u_train), dtype=torch.float32)
+noise_level = 0.01
+np.random.seed(0)
+u_train += torch.randn(u_train.shape) * abs(u_train).max() * noise_level
+
 X_f_train = torch.tensor(lhs(1, Nf), dtype=torch.float32)
 dist_f_train = torch.tensor(true_dist(X_f_train), dtype=torch.float32)
 forcing_f_train = torch.tensor(true_forcing(X_f_train), dtype=torch.float32)
@@ -44,7 +48,6 @@ X_f_train = X_f_train.to(device)
 X_f_train.requires_grad = True
 dist_f_train = dist_f_train.to(device)
 forcing_f_train = forcing_f_train.to(device)
-
 
 
 class PINN(nn.Module):
