@@ -86,22 +86,24 @@ def main(Nu,Nf,layers):
             # compute m first
             x_copy = x.clone()
             m = self.m_compute(x_copy)
+            u_out = self.linears[0](x)
             
-            for i, linear in enumerate(self.linears[:-1]):
-                x = self.activation(linear(x))
-            x = self.linears[-1](x)  # No activation on the last layer (u)
-            return x, m
+            for linear in self.linears[1:-1]:
+                u_out = self.activation(linear(u_out))
+            u_out = self.linears[-1](u_out)  # No activation on the last layer (u)
+            return u_out, m
         
         def m_compute(self, x):
             # print(x.shape)
             a_ = torch.tensor(a, dtype=torch.float32)
             b_ = torch.tensor(b, dtype=torch.float32)
             #preprocessing input 
+            m_out = self.linears_m[0](x)
             
-            for i, linear in enumerate(self.linears_m[:-1]):
-                x = self.activation(linear(x))
-            x = self.linears_m[-1](x)  # No activation on the last layer (u)
-            return x
+            for i, linear in enumerate(self.linears_m[1:-1]):
+                m_out = self.activation(linear(m_out))
+            m_out = self.linears_m[-1](m_out)  # No activation on the last layer (u)
+            return m_out
         
         def compute_loss(self, x_u, u_true, x_f):
             x_f.requires_grad = True
@@ -123,7 +125,7 @@ def main(Nu,Nf,layers):
 
             return loss, loss_u, loss_f
 
-        def train(self, x_u, u_true, x_f, epochs, lr, log_path):
+        def training_step(self, x_u, u_true, x_f, epochs, lr, log_path):
             # Move model to the selected device
             self.to(device) 
             # adam optimizer
@@ -135,11 +137,12 @@ def main(Nu,Nf,layers):
                 import csv
                 with open(log_path, 'w') as f:
                     writer = csv.writer(f)
-                    writer.writerow(['epoch', 'loss_misfit', 'loss_f', 'loss', 'run_time', 'm_sol'])
+                    writer.writerow(['epoch', 'loss_misfit', 'loss_f', 'loss', 'run_time', 'm_sol', 'u_sol'])
             
             start_time = time.time()
             for epoch in range(epochs): # loop over the dataset multiple times
                 optimizer.zero_grad()
+                self.train()
                 loss, loss_u, loss_f = self.compute_loss(x_u, u_true, x_f)
                 loss.backward()
                 optimizer.step()
@@ -151,12 +154,17 @@ def main(Nu,Nf,layers):
                 
                 if (epoch+1) % 1000 == 0: # Print the loss every 100 epochs
                     end_time = time.time()
-                    print(f"Epoch {(epoch+1)}, loss_misfit: {loss_u.item():1.2e}, loss_f: {loss_f.item():1.2e}, loss: {loss.item():1.2e}, run time: {end_time - start_time}s")
+                    print(f"Epoch {(epoch+1)}, loss_misfit: {loss_u.item():1.2e}, loss_f: {loss_f.item():1.2e}, loss: {loss.item():1.2e}, best_loss: {self.best_loss.item():1.2e}, run time: {end_time - start_time}s")
                     start_time = time.time()
 
+
                     with open(log_path, 'a') as file:
+                        self.eval()
+                        with torch.no_grad():
+                            u,m = self.forward(x_u)
+
                         writer = csv.writer(file)
-                        writer.writerow([epoch+1, loss_u.item(),loss_f.item(),loss.item(),end_time - start_time,m.detach().cpu().tolist()])
+                        writer.writerow([epoch+1, loss_u.item(),loss_f.item(),loss.item(),end_time - start_time,m.detach().cpu().tolist(),u.detach().cpu().tolist()])
     
     
     ## ======== definition of model ends here. Start defining parameter ========
@@ -168,7 +176,7 @@ def main(Nu,Nf,layers):
     now = datetime.now()
     dt_string = now.strftime("%Y%m%d-%H%M%S")
     dir_name = f"PINN_results_{dt_string}"
-    path_ = f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/{dir_name}'
+    path_ = f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/2m_run_1p_noise/Nu_{Nu}_Nf_{Nf}/{dir_name}'
     save_path = increment_path(path_, mkdir=True)
 
     log_path = f'{save_path}/opt_log.csv'
@@ -177,11 +185,11 @@ def main(Nu,Nf,layers):
     # layers = [1, 50, 50, 50, 50, 50, 50, 1]
     model = PINN(layers)
     model.to(device)
-    epochs = 3000
+    epochs = 2000000
     learning_rate = 1e-4
 
     start_time = time.time()
-    model.train(X_u_train, u_train, X_f_train, epochs, learning_rate, log_path)
+    model.training_step(X_u_train, u_train, X_f_train, epochs, learning_rate, log_path)
     Adam_time = time.time() - start_time
     print('Training time: {:.4f} seconds'.format((Adam_time)))
 
@@ -215,6 +223,7 @@ def main(Nu,Nf,layers):
         'Nf': Nf,
         'adam_runtime': Adam_time,
         'lbfgs_runtime': LBFGS_time,
+        'layers': layers,
         'x_u_train': X_u_train.cpu().tolist(),
         'u_train': u_train.cpu().tolist(),
         'u_sol': u.detach().cpu().tolist(),
@@ -232,13 +241,19 @@ if __name__ == "__main__":
     Nu_list = [64, 128, 256, 512, 1024,2048]
     Nf_list = [1000,5000,10000]
     
-    layers_list = [[1, 50, 50, 50, 50, 50, 50, 1],
+    layers_list = [
+                #    [1, 20, 20, 20, 20, 20, 20, 20, 1],
+                #    [1, 15, 15, 15, 15, 15, 15, 15, 1],
                    [1, 50, 50, 50, 50, 50, 1],
                    [1, 50, 50, 50, 50, 1],
+                   [1, 40, 40, 40, 40, 40,1],
                     ]
 
     # for Nu in Nu_list:
     #     for Nf in Nf_list:
     #         main(Nu,Nf)
 
-    main(64,1000, layers_list[0])
+    for layers in layers_list:
+        main(64,1000, layers)
+        # main(256,1000, layers)
+        # main(512,1000, layers)
