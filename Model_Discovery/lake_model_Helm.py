@@ -15,15 +15,20 @@ file_path = os.getcwd()
 a, b = 0.0, 1.0
 
 # Load True Solution and paramters
-df = pd.read_csv(f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data.csv')
-x_array, mtrue_array, utrue_array = np.array(df['x']), np.array(df['mtrue']), np.array(df['utrue'])
-forcing_array, dist_array = np.array(df['forcing']), np.array(df['distribution'])
+# df = pd.read_csv(f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data.csv')
+df = pd.read_csv(f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
+x_array, mtrue_array, utrue1_array, utrue2_array = np.array(df['x']), np.array(df['mtrue']), np.array(df['utrue1']), np.array(df['utrue2'])
+forcing1_array, forcing2_array, dist_array = np.array(df['g1']), np.array(df['g2']), np.array(df['distribution'])
 omega = np.array(df['omega'])[0]
 
 from scipy.interpolate import interp1d
-true_solution = interp1d(x_array, utrue_array)
+# true_solution = interp1d(x_array, utrue_array)
+true_solution1 = interp1d(x_array, utrue1_array)
+true_solution2 = interp1d(x_array, utrue2_array)
 true_dist = interp1d(x_array, dist_array)
-true_forcing = interp1d(x_array, forcing_array)
+# true_forcing = interp1d(x_array, forcing_array)
+true_forcing1 = interp1d(x_array, forcing1_array)
+true_forcing2 = interp1d(x_array, forcing2_array)
 omega = torch.tensor(omega, dtype=torch.float32, device=device)
 
 
@@ -33,23 +38,33 @@ def main(Nu,Nf,layers):
 
     # define training data and add noise
     X_u_train = torch.linspace(a,b, Nu, dtype=torch.float32)[:, None]
-    u_train = torch.tensor(true_solution(X_u_train), dtype=torch.float32)
-    noise_level = 0.01
+    # u_train = torch.tensor(true_solution(X_u_train), dtype=torch.float32)
+    u_train1 = torch.tensor(true_solution1(X_u_train), dtype=torch.float32)
+    u_train2 = torch.tensor(true_solution2(X_u_train), dtype=torch.float32)
+    noise_level = 0.03
     np.random.seed(0)
-    u_train += torch.randn(u_train.shape) * abs(u_train).max() * noise_level
+    # u_train += torch.randn(u_train.shape) * abs(u_train).max() * noise_level
+    u_train1 += torch.randn(u_train1.shape) * abs(u_train1).max() * noise_level
+    u_train2 += torch.randn(u_train2.shape) * abs(u_train2).max() * noise_level
 
 
     X_f_train = torch.tensor(lhs(1, Nf), dtype=torch.float32)
     dist_f_train = torch.tensor(true_dist(X_f_train), dtype=torch.float32)
-    forcing_f_train = torch.tensor(true_forcing(X_f_train), dtype=torch.float32)
+    # forcing_f_train = torch.tensor(true_forcing(X_f_train), dtype=torch.float32)
+    forcing_f_train1 = torch.tensor(true_forcing1(X_f_train), dtype=torch.float32)
+    forcing_f_train2 = torch.tensor(true_forcing2(X_f_train), dtype=torch.float32)
 
     # Move data to the selected device
     X_u_train = X_u_train.to(device)
-    u_train = u_train.to(device)
+    # u_train = u_train.to(device)
+    u_train1 = u_train1.to(device)
+    u_train2 = u_train2.to(device)
     X_f_train = X_f_train.to(device)
     X_f_train.requires_grad = True
     dist_f_train = dist_f_train.to(device)
-    forcing_f_train = forcing_f_train.to(device)
+    # forcing_f_train = forcing_f_train.to(device)
+    forcing_f_train1 = forcing_f_train1.to(device)
+    forcing_f_train2 = forcing_f_train2.to(device)
 
     class PINN(nn.Module):
         def __init__(self, layers):
@@ -86,12 +101,27 @@ def main(Nu,Nf,layers):
             # compute m first
             x_copy = x.clone()
             m = self.m_compute(x_copy)
+            u2_out = self.forward2(x_copy)
             u_out = self.linears[0](x)
             
             for linear in self.linears[1:-1]:
                 u_out = self.activation(linear(u_out))
             u_out = self.linears[-1](u_out)  # No activation on the last layer (u)
-            return u_out, m
+            return u_out,u2_out,m
+        
+        def forward2(self, x):
+            '''This is for ud2. forward if for ud1'''
+            a_ = torch.tensor(a, dtype=torch.float32)
+            b_ = torch.tensor(b, dtype=torch.float32)
+            #preprocessing input 
+            x = (x - a_)/(b_ - a_) #feature scaling
+            u_out = self.linears[0](x)
+            for linear in self.linears[1:-1]:
+                u_out = self.activation(linear(u_out))
+            u_out = self.linears[-1](u_out)
+            return u_out
+
+
         
         def m_compute(self, x):
             # print(x.shape)
@@ -105,27 +135,43 @@ def main(Nu,Nf,layers):
             m_out = self.linears_m[-1](m_out)  # No activation on the last layer (u)
             return m_out
         
-        def compute_loss(self, x_u, u_true, x_f):
+        def compute_loss(self, x_u, u_true1, u_true2, x_f):
             x_f.requires_grad = True
             # Calculate u from the network at boundary points and collocation points
-            u_f_pred, m_pred = self.forward(x_f)
+            u_f_pred, u2_f_pred, m_pred = self.forward(x_f)
+            self.u_f_pred = u_f_pred
+            self.u2_f_pred = u2_f_pred
+            self.m_pred = m_pred
             
             # Compute f (similar to TensorFlow implementation)
             u_f_pred_grads = torch.autograd.grad(u_f_pred, x_f, grad_outputs=torch.ones_like(u_f_pred), retain_graph=True, create_graph=True)[0]
             u_f_pred_xx = torch.autograd.grad(torch.exp(m_pred) * u_f_pred_grads, x_f, grad_outputs=torch.ones_like(u_f_pred_grads[:,[0]]), create_graph=True)[0]
+            u2_f_pred_grads = torch.autograd.grad(u2_f_pred, x_f, grad_outputs=torch.ones_like(u2_f_pred), retain_graph=True, create_graph=True)[0]
+            u2_f_pred_xx = torch.autograd.grad(torch.exp(m_pred) * u2_f_pred_grads, x_f, grad_outputs=torch.ones_like(u2_f_pred_grads[:,[0]]), create_graph=True)[0]
 
-            rhs = forcing_f_train
-            f_pred = - u_f_pred_xx + omega * dist_f_train * u_f_pred - rhs
+            # compute the residual of u1
+            rhs = forcing_f_train1
+            # f_pred = - u_f_pred_xx + omega * dist_f_train * u_f_pred - rhs
+            f1_pred = - u_f_pred_xx + omega * dist_f_train * u_f_pred - rhs
+
+            rhs2 = forcing_f_train2
+            f2_pred = - u2_f_pred_xx + omega * dist_f_train * u2_f_pred - rhs2
             
             # Calculate the loss
-            loss_f = self.loss_function(f_pred, torch.zeros_like(f_pred)) # residual loss
-            u_pred, _ = self.forward(x_u)
-            loss_u = self.loss_function(u_pred, u_true) # boundary loss
-            loss = loss_f + loss_u
+            # loss_f = self.loss_function(f_pred, torch.zeros_like(f_pred)) # residual loss
+            loss_f1 = self.loss_function(f1_pred, torch.zeros_like(f1_pred)) # residual loss
+            loss_f2 = self.loss_function(f2_pred, torch.zeros_like(f2_pred))
 
-            return loss, loss_u, loss_f
+            u_pred, u2_pred, _ = self.forward(x_u)
+            # loss_u = self.loss_function(u_pred, u_true) # boundary loss
+            loss_u1 = self.loss_function(u_pred, u_true1)
+            loss_u2 = self.loss_function(u2_pred, u_true2)
+            # loss = loss_f + loss_u
+            loss = loss_f1 + loss_f2 + loss_u1 + loss_u2
 
-        def training_step(self, x_u, u_true, x_f, epochs, lr, log_path):
+            return loss, loss_f1 , loss_f2 , loss_u1 , loss_u2
+
+        def training_step(self, x_u, u_true1, u_true2, x_f, epochs, lr, log_path):
             # Move model to the selected device
             self.to(device) 
             # adam optimizer
@@ -137,35 +183,37 @@ def main(Nu,Nf,layers):
                 import csv
                 with open(log_path, 'w') as f:
                     writer = csv.writer(f)
-                    writer.writerow(['epoch', 'loss_misfit', 'loss_f', 'loss', 'run_time', 'm_sol', 'u_sol'])
+                    writer.writerow(['epoch', 'loss_misfit1', 'loss_misfit2', 'loss_f1', 'loss_f2', 'loss', 'run_time', 'm_sol', 'u_sol1', 'u_sol2'])
             
             start_time = time.time()
             for epoch in range(epochs): # loop over the dataset multiple times
                 optimizer.zero_grad()
                 self.train()
-                loss, loss_u, loss_f = self.compute_loss(x_u, u_true, x_f)
+                loss, loss_f1 , loss_f2 , loss_u1 , loss_u2 = self.compute_loss(x_u, u_true1, u_true2, x_f)
+                # save the best models before updating the parameters
+
                 loss.backward()
                 optimizer.step()
 
                 if loss < self.best_loss:
                     self.best_loss = loss
                     self.best_model = deepcopy(self.state_dict())
-                    self.best_u, self.best_m = self.forward(x_u)
+                    self.best_u1, self.best_u2, self.best_m = self.forward(x_u)
                 
-                if (epoch+1) % 1000 == 0: # Print the loss every 100 epochs
+                if (epoch+1) % 1 == 0: # Print the loss every 100 epochs
                     end_time = time.time()
-                    print(f"Epoch {(epoch+1)}, loss_misfit: {loss_u.item():1.2e}, loss_f: {loss_f.item():1.2e}, loss: {loss.item():1.2e}, best_loss: {self.best_loss.item():1.2e}, run time: {end_time - start_time}s")
-                    start_time = time.time()
+                    print(f"Epoch {(epoch+1)}, loss_misfit1: {loss_u1.item():1.2e}, loss_misfit2: {loss_u2.item():1.2e}, loss_f1: {loss_f1.item():1.2e}, loss_f2: {loss_f2.item():1.2e}, loss: {loss.item():1.2e}, best_loss: {self.best_loss.item():1.2e}, run time: {end_time - start_time}s")
 
 
                     with open(log_path, 'a') as file:
                         self.eval()
                         with torch.no_grad():
-                            u,m = self.forward(x_u)
+                            u1,u2,m = self.forward(x_u)
 
                         writer = csv.writer(file)
-                        writer.writerow([epoch+1, loss_u.item(),loss_f.item(),loss.item(),end_time - start_time,m.detach().cpu().tolist(),u.detach().cpu().tolist()])
+                        writer.writerow([epoch+1, loss_u1.item(), loss_u2.item(),loss_f1.item(),loss_f2.item(),loss.item(),end_time - start_time,m.detach().cpu().tolist(),u1.detach().cpu().tolist(),u2.detach().cpu().tolist()])
     
+                    start_time = time.time()
     
     ## ======== definition of model ends here. Start defining parameter ========
     ## ===================== save model =====================
@@ -176,7 +224,7 @@ def main(Nu,Nf,layers):
     now = datetime.now()
     dt_string = now.strftime("%Y%m%d-%H%M%S")
     dir_name = f"PINN_results_{dt_string}"
-    path_ = f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/2m_run_1p_noise/Nu_{Nu}_Nf_{Nf}/{dir_name}'
+    path_ = f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/poodle_2m_run_1p_noise/Nu_{Nu}_Nf_{Nf}/{dir_name}'
     save_path = increment_path(path_, mkdir=True)
 
     log_path = f'{save_path}/opt_log.csv'
@@ -185,11 +233,11 @@ def main(Nu,Nf,layers):
     # layers = [1, 50, 50, 50, 50, 50, 50, 1]
     model = PINN(layers)
     model.to(device)
-    epochs = 2000000
+    epochs = 10
     learning_rate = 1e-4
 
     start_time = time.time()
-    model.training_step(X_u_train, u_train, X_f_train, epochs, learning_rate, log_path)
+    model.training_step(X_u_train, u_train1, u_train2, X_f_train, epochs, learning_rate, log_path)
     Adam_time = time.time() - start_time
     print('Training time: {:.4f} seconds'.format((Adam_time)))
 
@@ -198,24 +246,25 @@ def main(Nu,Nf,layers):
     optimizer = torch.optim.LBFGS(model.parameters(), lr=1, tolerance_grad=1e-10, history_size=100, line_search_fn="strong_wolfe")
     def closure():
         optimizer.zero_grad()
-        loss, loss_u, loss_f = model.compute_loss(X_u_train, u_train, X_f_train)
+        loss, loss_f1 , loss_f2 , loss_u1 , loss_u2 = model.compute_loss(X_u_train, u_train1, u_train2, X_f_train)
         loss.backward()
         return loss
     for lbfgs_iter in range(1):
         optimizer.step(closure)
-        loss, loss_u, loss_f = model.compute_loss(X_u_train, u_train, X_f_train)
+        loss, loss_f1 , loss_f2 , loss_u1 , loss_u2 = model.compute_loss(X_u_train, u_train1, u_train2, X_f_train)
         if loss < model.best_loss:
             model.best_loss = loss
             model.best_model = deepcopy(model.state_dict())
-            model.best_u, model.best_m = model.forward(X_u_train)
-        print(f"LBFGS: Loss_misfit: {loss_u.item():1.2e}, loss_f: {loss_f.item():1.2e}, loss: {loss.item():1.2e}")
+            model.best_u1, model.best_u2, model.best_m = model.forward(X_u_train)
+        print(f"LBFGS: loss_misfit1: {loss_u1.item():1.2e}, loss_misfit2: {loss_u2.item():1.2e}, loss_f1: {loss_f1.item():1.2e}, loss_f2: {loss_f2.item():1.2e}, loss: {loss.item():1.2e}")
         # print(f"LBFGS: Loss_misfit: {loss_u.item():1.2e}, loss_f: {loss_f.item():1.2e}, loss: {loss.item():1.2e} , exp(m): {np.exp(model.m.item()):.5f}")
     LBFGS_time = time.time() - start_time1
     print('LBFGS time: {:.4f} seconds'.format((LBFGS_time)))
 
 
     # u, m = model.forward(X_u_train)
-    u, m = model.best_u, model.best_m
+    # u, m = model.best_u, model.best_m
+    u1, u2, m = model.best_u1, model.best_u2, model.best_m
 
     # define results dict
     results = {
@@ -225,8 +274,12 @@ def main(Nu,Nf,layers):
         'lbfgs_runtime': LBFGS_time,
         'layers': layers,
         'x_u_train': X_u_train.cpu().tolist(),
-        'u_train': u_train.cpu().tolist(),
-        'u_sol': u.detach().cpu().tolist(),
+        # 'u_train': u_train.cpu().tolist(),
+        'u_train1': u_train1.cpu().tolist(),
+        'u_train2': u_train2.cpu().tolist(),
+        # 'u_sol': u.detach().cpu().tolist(),
+        'u_sol1': u1.detach().cpu().tolist(),
+        'u_sol2': u2.detach().cpu().tolist(),
         'm_sol': m.detach().cpu().tolist(),
         'x_for_m_true': x_array.tolist(),
         'm_true': mtrue_array.tolist(),
@@ -244,9 +297,9 @@ if __name__ == "__main__":
     layers_list = [
                 #    [1, 20, 20, 20, 20, 20, 20, 20, 1],
                 #    [1, 15, 15, 15, 15, 15, 15, 15, 1],
-                   [1, 50, 50, 50, 50, 50, 1],
+                #   [1, 50, 50, 50, 50, 50, 1],
                    [1, 50, 50, 50, 50, 1],
-                   [1, 40, 40, 40, 40, 40,1],
+                #   [1, 40, 40, 40, 40, 40,1],
                     ]
 
     # for Nu in Nu_list:
