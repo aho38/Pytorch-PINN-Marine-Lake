@@ -16,7 +16,8 @@ a, b = 0.0, 1.0
 
 # Load True Solution and paramters
 # df = pd.read_csv(f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data.csv')
-df = pd.read_csv(f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
+# df = pd.read_csv(f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
+df = pd.read_csv(f'/Users/alexho/Dropbox/2024_spring/PINN_testing/Pytorch_PINN/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
 x_array, mtrue_array, utrue1_array, utrue2_array = np.array(df['x']), np.array(df['mtrue']), np.array(df['utrue1']), np.array(df['utrue2'])
 forcing1_array, forcing2_array, dist_array = np.array(df['g1']), np.array(df['g2']), np.array(df['distribution'])
 omega = np.array(df['omega'])[0]
@@ -200,7 +201,7 @@ def main(Nu,Nf,layers):
                     self.best_model = deepcopy(self.state_dict())
                     self.best_u1, self.best_u2, self.best_m = self.forward(x_u)
                 
-                if (epoch+1) % 1 == 0: # Print the loss every 100 epochs
+                if (epoch+1) % 10 == 0: # Print the loss every 100 epochs
                     end_time = time.time()
                     print(f"Epoch {(epoch+1)}, loss_misfit1: {loss_u1.item():1.2e}, loss_misfit2: {loss_u2.item():1.2e}, loss_f1: {loss_f1.item():1.2e}, loss_f2: {loss_f2.item():1.2e}, loss: {loss.item():1.2e}, best_loss: {self.best_loss.item():1.2e}, run time: {end_time - start_time}s")
 
@@ -224,7 +225,8 @@ def main(Nu,Nf,layers):
     now = datetime.now()
     dt_string = now.strftime("%Y%m%d-%H%M%S")
     dir_name = f"PINN_results_{dt_string}"
-    path_ = f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/poodle_2m_run_1p_noise/Nu_{Nu}_Nf_{Nf}/{dir_name}'
+    # path_ = f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/poodle_2m_run_1p_noise/Nu_{Nu}_Nf_{Nf}/{dir_name}'
+    path_ = f'/Users/alexho/Dropbox/2024_spring/PINN_testing/Pytorch_PINN/Model_Discovery/log/poodle_2m_run_1p_noise/Nu_{Nu}_Nf_{Nf}/{dir_name}'
     save_path = increment_path(path_, mkdir=True)
 
     log_path = f'{save_path}/opt_log.csv'
@@ -233,7 +235,7 @@ def main(Nu,Nf,layers):
     # layers = [1, 50, 50, 50, 50, 50, 50, 1]
     model = PINN(layers)
     model.to(device)
-    epochs = 10
+    epochs = 100
     learning_rate = 1e-4
 
     start_time = time.time()
