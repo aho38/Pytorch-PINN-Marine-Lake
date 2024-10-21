@@ -5,6 +5,7 @@ import time
 import pandas as pd
 import os
 from copy import deepcopy
+import matplotlib.pyplot as plt
 from pyDOE import lhs # Latin Hypercube Sampling
 
 # Check if CUDA is available, otherwise use CPU
@@ -42,7 +43,7 @@ def main(Nu,Nf,layers):
     # u_train = torch.tensor(true_solution(X_u_train), dtype=torch.float32)
     u_train1 = torch.tensor(true_solution1(X_u_train), dtype=torch.float32)
     u_train2 = torch.tensor(true_solution2(X_u_train), dtype=torch.float32)
-    noise_level = 0.03
+    noise_level = 0.01
     np.random.seed(0)
     # u_train += torch.randn(u_train.shape) * abs(u_train).max() * noise_level
     u_train1 += torch.randn(u_train1.shape) * abs(u_train1).max() * noise_level
@@ -69,6 +70,7 @@ def main(Nu,Nf,layers):
 
     class PINN(nn.Module):
         def __init__(self, layers):
+            
             super(PINN, self).__init__()
             self.layers = layers
             self.num_layers = len(layers)
@@ -112,10 +114,6 @@ def main(Nu,Nf,layers):
         
         def forward2(self, x):
             '''This is for ud2. forward if for ud1'''
-            a_ = torch.tensor(a, dtype=torch.float32)
-            b_ = torch.tensor(b, dtype=torch.float32)
-            #preprocessing input 
-            x = (x - a_)/(b_ - a_) #feature scaling
             u_out = self.linears[0](x)
             for linear in self.linears[1:-1]:
                 u_out = self.activation(linear(u_out))
@@ -168,7 +166,7 @@ def main(Nu,Nf,layers):
             loss_u1 = self.loss_function(u_pred, u_true1)
             loss_u2 = self.loss_function(u2_pred, u_true2)
             # loss = loss_f + loss_u
-            loss = loss_f1 + loss_f2 + loss_u1 + loss_u2
+            loss = (loss_f1 + loss_u1)*0.5 + (loss_f2 + loss_u2)*0.5
 
             return loss, loss_f1 , loss_f2 , loss_u1 , loss_u2
 
@@ -193,15 +191,16 @@ def main(Nu,Nf,layers):
                 loss, loss_f1 , loss_f2 , loss_u1 , loss_u2 = self.compute_loss(x_u, u_true1, u_true2, x_f)
                 # save the best models before updating the parameters
 
-                loss.backward()
-                optimizer.step()
-
                 if loss < self.best_loss:
                     self.best_loss = loss
                     self.best_model = deepcopy(self.state_dict())
                     self.best_u1, self.best_u2, self.best_m = self.forward(x_u)
+
+                loss.backward()
+                optimizer.step()
+
                 
-                if (epoch+1) % 10 == 0: # Print the loss every 100 epochs
+                if (epoch+1) % 100 == 0: # Print the loss every 100 epochs
                     end_time = time.time()
                     print(f"Epoch {(epoch+1)}, loss_misfit1: {loss_u1.item():1.2e}, loss_misfit2: {loss_u2.item():1.2e}, loss_f1: {loss_f1.item():1.2e}, loss_f2: {loss_f2.item():1.2e}, loss: {loss.item():1.2e}, best_loss: {self.best_loss.item():1.2e}, run time: {end_time - start_time}s")
 
@@ -235,7 +234,7 @@ def main(Nu,Nf,layers):
     # layers = [1, 50, 50, 50, 50, 50, 50, 1]
     model = PINN(layers)
     model.to(device)
-    epochs = 100
+    epochs = 100000
     learning_rate = 1e-4
 
     start_time = time.time()
@@ -269,6 +268,16 @@ def main(Nu,Nf,layers):
     u1, u2, m = model.best_u1, model.best_u2, model.best_m
 
     # define results dict
+    fig, ax = plt.subplots(1,3, figsize=(18, 5))
+    ax[0].plot(X_u_train.cpu(), m.detach().cpu(), 'r')
+    ax[0].plot(x_array, mtrue_array, 'b')
+
+    ax[1].plot(X_u_train.cpu(), u1.detach().cpu(), 'r')
+    ax[1].plot(X_u_train.cpu(), u_train1.cpu(), 'b')
+
+    ax[2].plot(X_u_train.cpu(), u2.detach().cpu(), 'r')
+    ax[2].plot(X_u_train.cpu(), u_train2.cpu(), 'b')
+    plt.show()
     results = {
         'Nu': Nu,
         'Nf': Nf,
@@ -301,6 +310,7 @@ if __name__ == "__main__":
                 #    [1, 15, 15, 15, 15, 15, 15, 15, 1],
                 #   [1, 50, 50, 50, 50, 50, 1],
                    [1, 50, 50, 50, 50, 1],
+                #    [1, 50, 50, 50, 1],
                 #   [1, 40, 40, 40, 40, 40,1],
                     ]
 
