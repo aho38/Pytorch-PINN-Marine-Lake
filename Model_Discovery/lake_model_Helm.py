@@ -4,6 +4,7 @@ import numpy as np
 import time
 import pandas as pd
 import os
+import csv
 from copy import deepcopy
 import matplotlib.pyplot as plt
 from pyDOE import lhs # Latin Hypercube Sampling
@@ -18,7 +19,8 @@ a, b = 0.0, 1.0
 # Load True Solution and paramters
 # df = pd.read_csv(f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data.csv')
 # df = pd.read_csv(f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
-df = pd.read_csv(f'/Users/alexho/Dropbox/2024_spring/PINN_testing/Pytorch_PINN/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
+# df = pd.read_csv(f'/Users/alexho/Dropbox/2024_spring/PINN_testing/Pytorch_PINN/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
+df = pd.read_csv('/home/aho38/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
 x_array, mtrue_array, utrue1_array, utrue2_array = np.array(df['x']), np.array(df['mtrue']), np.array(df['utrue1']), np.array(df['utrue2'])
 forcing1_array, forcing2_array, dist_array = np.array(df['g1']), np.array(df['g2']), np.array(df['distribution'])
 omega = np.array(df['omega'])[0]
@@ -35,7 +37,7 @@ omega = torch.tensor(omega, dtype=torch.float32, device=device)
 
 
 
-def main(Nu,Nf,layers):
+def main(Nu,Nf,layers,noise_level):
     a, b = 0.0, 1.0
 
     # define training data and add noise
@@ -43,7 +45,7 @@ def main(Nu,Nf,layers):
     # u_train = torch.tensor(true_solution(X_u_train), dtype=torch.float32)
     u_train1 = torch.tensor(true_solution1(X_u_train), dtype=torch.float32)
     u_train2 = torch.tensor(true_solution2(X_u_train), dtype=torch.float32)
-    noise_level = 0.01
+    #noise_level = 0.0
     np.random.seed(0)
     # u_train += torch.randn(u_train.shape) * abs(u_train).max() * noise_level
     u_train1 += torch.randn(u_train1.shape) * abs(u_train1).max() * noise_level
@@ -69,10 +71,11 @@ def main(Nu,Nf,layers):
     forcing_f_train2 = forcing_f_train2.to(device)
 
     class PINN(nn.Module):
-        def __init__(self, layers):
+        def __init__(self, layers: list, betas: list):
             
             super(PINN, self).__init__()
             self.layers = layers
+            self.betas = betas
             self.num_layers = len(layers)
             self.loss_function = nn.MSELoss()
 
@@ -145,20 +148,23 @@ def main(Nu,Nf,layers):
             # Compute f (similar to TensorFlow implementation)
             u_f_pred_grads = torch.autograd.grad(u_f_pred, x_f, grad_outputs=torch.ones_like(u_f_pred), retain_graph=True, create_graph=True)[0]
             u_f_pred_xx = torch.autograd.grad(torch.exp(m_pred) * u_f_pred_grads, x_f, grad_outputs=torch.ones_like(u_f_pred_grads[:,[0]]), create_graph=True)[0]
-            u2_f_pred_grads = torch.autograd.grad(u2_f_pred, x_f, grad_outputs=torch.ones_like(u2_f_pred), retain_graph=True, create_graph=True)[0]
-            u2_f_pred_xx = torch.autograd.grad(torch.exp(m_pred) * u2_f_pred_grads, x_f, grad_outputs=torch.ones_like(u2_f_pred_grads[:,[0]]), create_graph=True)[0]
 
-            # compute the residual of u1
+            # compute residual for u1
             rhs = forcing_f_train1
             # f_pred = - u_f_pred_xx + omega * dist_f_train * u_f_pred - rhs
             f1_pred = - u_f_pred_xx + omega * dist_f_train * u_f_pred - rhs
+            loss_f1 = self.loss_function(f1_pred, torch.zeros_like(f1_pred)) # residual loss
 
+
+            u2_f_pred_grads = torch.autograd.grad(u2_f_pred, x_f, grad_outputs=torch.ones_like(u2_f_pred), retain_graph=True, create_graph=True)[0]
+            u2_f_pred_xx = torch.autograd.grad(torch.exp(m_pred) * u2_f_pred_grads, x_f, grad_outputs=torch.ones_like(u2_f_pred_grads[:,[0]]), create_graph=True)[0]
+
+            # compute the residual of u2
             rhs2 = forcing_f_train2
             f2_pred = - u2_f_pred_xx + omega * dist_f_train * u2_f_pred - rhs2
             
             # Calculate the loss
             # loss_f = self.loss_function(f_pred, torch.zeros_like(f_pred)) # residual loss
-            loss_f1 = self.loss_function(f1_pred, torch.zeros_like(f1_pred)) # residual loss
             loss_f2 = self.loss_function(f2_pred, torch.zeros_like(f2_pred))
 
             u_pred, u2_pred, _ = self.forward(x_u)
@@ -166,7 +172,7 @@ def main(Nu,Nf,layers):
             loss_u1 = self.loss_function(u_pred, u_true1)
             loss_u2 = self.loss_function(u2_pred, u_true2)
             # loss = loss_f + loss_u
-            loss = (loss_f1 + loss_u1)*0.5 + (loss_f2 + loss_u2)*0.5
+            loss = (loss_f1 + loss_u1)*self.betas[0] + (loss_f2 + loss_u2)*self.betas[1]
 
             return loss, loss_f1 , loss_f2 , loss_u1 , loss_u2
 
@@ -174,12 +180,13 @@ def main(Nu,Nf,layers):
             # Move model to the selected device
             self.to(device) 
             # adam optimizer
-            optimizer = torch.optim.Adam(self.parameters(), lr=lr,betas=(0.9, 0.999), eps=1e-07)
+            if not hasattr(self, 'optimizer'):
+                optimizer = torch.optim.Adam(self.parameters(), lr=lr,betas=(0.9, 0.999), eps=1e-07)
 
+            import csv
             if os.path.exists(log_path):
                 pass
             else:
-                import csv
                 with open(log_path, 'w') as f:
                     writer = csv.writer(f)
                     writer.writerow(['epoch', 'loss_misfit1', 'loss_misfit2', 'loss_f1', 'loss_f2', 'loss', 'run_time', 'm_sol', 'u_sol1', 'u_sol2'])
@@ -188,6 +195,10 @@ def main(Nu,Nf,layers):
             for epoch in range(epochs): # loop over the dataset multiple times
                 optimizer.zero_grad()
                 self.train()
+                # if epoch % 2 == 0:
+                #     self.betas = [1.0, 0.0]
+                # else: 
+                #     self.betas = [0.0, 1.0]
                 loss, loss_f1 , loss_f2 , loss_u1 , loss_u2 = self.compute_loss(x_u, u_true1, u_true2, x_f)
                 # save the best models before updating the parameters
 
@@ -223,24 +234,47 @@ def main(Nu,Nf,layers):
     from datetime import datetime
     now = datetime.now()
     dt_string = now.strftime("%Y%m%d-%H%M%S")
-    dir_name = f"PINN_results_{dt_string}"
+    dir_name = f"PINN_results_noise{int(noise_level*100)}_{dt_string}"
     # path_ = f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/poodle_2m_run_1p_noise/Nu_{Nu}_Nf_{Nf}/{dir_name}'
-    path_ = f'/Users/alexho/Dropbox/2024_spring/PINN_testing/Pytorch_PINN/Model_Discovery/log/poodle_2m_run_1p_noise/Nu_{Nu}_Nf_{Nf}/{dir_name}'
+    # path_ = f'/Users/alexho/Dropbox/2024_spring/PINN_testing/Pytorch_PINN/Model_Discovery/log/poodle_2m_run_1p_noise/Nu_{Nu}_Nf_{Nf}/{dir_name}'
+    path_ = f'/home/aho38/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/TEST_transfer-learning_double_data_runs/Nu_{Nu}_Nf_{Nf}/{dir_name}'
     save_path = increment_path(path_, mkdir=True)
 
     log_path = f'{save_path}/opt_log.csv'
 
 
     # layers = [1, 50, 50, 50, 50, 50, 50, 1]
-    model = PINN(layers)
+    betas = [1.0, 0.0]
+    model = PINN(layers,betas)
     model.to(device)
-    epochs = 100000
+    epochs = 10000
     learning_rate = 1e-4
 
+    # training first with beta1 = 1 and beta 2 = 0
     start_time = time.time()
     model.training_step(X_u_train, u_train1, u_train2, X_f_train, epochs, learning_rate, log_path)
     Adam_time = time.time() - start_time
     print('Training time: {:.4f} seconds'.format((Adam_time)))
+
+    model.betas = [0.0, 1.0]
+    start_time = time.time()
+    model.training_step(X_u_train, u_train1, u_train2, X_f_train, epochs, learning_rate, log_path)
+    Adam_time = time.time() - start_time
+    print('Training time: {:.4f} seconds'.format((Adam_time)))
+
+    # Continue training with betas as 0.5s
+    # model.betas = [0.8, 0.2]
+    # # start_time = time.time()
+    # model.training_step(X_u_train, u_train1, u_train2, X_f_train, epochs, learning_rate, log_path)
+    # Adam_time = time.time() - start_time
+    # print('Training time: {:.4f} seconds'.format((Adam_time)))
+
+    # Continue training with betas as 0.5s
+    # model.betas = [0.5, 0.5]
+    # # start_time = time.time()
+    # model.training_step(X_u_train, u_train1, u_train2, X_f_train, epochs, learning_rate, log_path)
+    # Adam_time = time.time() - start_time
+    # print('Training time: {:.4f} seconds'.format((Adam_time)))
 
     start_time1 = time.time()
     ## L-BFGS
@@ -268,16 +302,16 @@ def main(Nu,Nf,layers):
     u1, u2, m = model.best_u1, model.best_u2, model.best_m
 
     # define results dict
-    fig, ax = plt.subplots(1,3, figsize=(18, 5))
-    ax[0].plot(X_u_train.cpu(), m.detach().cpu(), 'r')
-    ax[0].plot(x_array, mtrue_array, 'b')
+    #fig, ax = plt.subplots(1,3, figsize=(18, 5))
+    #ax[0].plot(X_u_train.cpu(), m.detach().cpu(), 'r')
+    #ax[0].plot(x_array, mtrue_array, 'b')
 
-    ax[1].plot(X_u_train.cpu(), u1.detach().cpu(), 'r')
-    ax[1].plot(X_u_train.cpu(), u_train1.cpu(), 'b')
+    #ax[1].plot(X_u_train.cpu(), u1.detach().cpu(), 'r')
+    #ax[1].plot(X_u_train.cpu(), u_train1.cpu(), 'b')
 
-    ax[2].plot(X_u_train.cpu(), u2.detach().cpu(), 'r')
-    ax[2].plot(X_u_train.cpu(), u_train2.cpu(), 'b')
-    plt.show()
+    #ax[2].plot(X_u_train.cpu(), u2.detach().cpu(), 'r')
+    #ax[2].plot(X_u_train.cpu(), u_train2.cpu(), 'b')
+    #plt.show()
     results = {
         'Nu': Nu,
         'Nf': Nf,
@@ -304,13 +338,14 @@ def main(Nu,Nf,layers):
 if __name__ == "__main__":
     Nu_list = [64, 128, 256, 512, 1024,2048]
     Nf_list = [1000,5000,10000]
-    
+    noise_level = 0.00
+
     layers_list = [
                 #    [1, 20, 20, 20, 20, 20, 20, 20, 1],
                 #    [1, 15, 15, 15, 15, 15, 15, 15, 1],
-                #   [1, 50, 50, 50, 50, 50, 1],
+                #    [1, 50, 50, 50, 50, 50, 1],
                    [1, 50, 50, 50, 50, 1],
-                #    [1, 50, 50, 50, 1],
+                    # [1, 50, 50, 50, 1],
                 #   [1, 40, 40, 40, 40, 40,1],
                     ]
 
@@ -319,6 +354,8 @@ if __name__ == "__main__":
     #         main(Nu,Nf)
 
     for layers in layers_list:
-        main(64,1000, layers)
-        # main(256,1000, layers)
-        # main(512,1000, layers)
+
+        main(32,1000, layers, noise_level)
+        # main(64,1000, layers, noise_level)
+        # main(256,1000, layers, noise_level)
+        # main(512,1000, layers, noise_level)
