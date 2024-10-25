@@ -42,9 +42,13 @@ def main(Nu,Nf,layers,noise_level):
 
     # define training data and add noise
     X_u_train = torch.linspace(a,b, Nu, dtype=torch.float32)[:, None]
+    # X_u_train1 = torch.linspace((b-a)/2 + a,b, Nu, dtype=torch.float32)[:, None]
+    # X_u_train2 = torch.linspace(a,(b-a)/2 + a, Nu, dtype=torch.float32)[:, None]
+    X_u_train1 = torch.linspace(a,b, Nu, dtype=torch.float32)[:, None]
+    X_u_train2 = torch.linspace(a,b, Nu, dtype=torch.float32)[:, None]
     # u_train = torch.tensor(true_solution(X_u_train), dtype=torch.float32)
-    u_train1 = torch.tensor(true_solution1(X_u_train), dtype=torch.float32)
-    u_train2 = torch.tensor(true_solution2(X_u_train), dtype=torch.float32)
+    u_train1 = torch.tensor(true_solution1(X_u_train1), dtype=torch.float32)
+    u_train2 = torch.tensor(true_solution2(X_u_train2), dtype=torch.float32)
     #noise_level = 0.0
     np.random.seed(0)
     # u_train += torch.randn(u_train.shape) * abs(u_train).max() * noise_level
@@ -52,20 +56,28 @@ def main(Nu,Nf,layers,noise_level):
     u_train2 += torch.randn(u_train2.shape) * abs(u_train2).max() * noise_level
 
 
-    X_f_train = torch.tensor(lhs(1, Nf), dtype=torch.float32)
-    dist_f_train = torch.tensor(true_dist(X_f_train), dtype=torch.float32)
+    X_f_train1 = torch.tensor(lhs(1, Nf), dtype=torch.float32)
+    X_f_train2 = torch.tensor(lhs(1, Nf), dtype=torch.float32)
+    dist_f_train1 = torch.tensor(true_dist(X_f_train1), dtype=torch.float32)
+    dist_f_train2 = torch.tensor(true_dist(X_f_train2), dtype=torch.float32)
     # forcing_f_train = torch.tensor(true_forcing(X_f_train), dtype=torch.float32)
-    forcing_f_train1 = torch.tensor(true_forcing1(X_f_train), dtype=torch.float32)
-    forcing_f_train2 = torch.tensor(true_forcing2(X_f_train), dtype=torch.float32)
+    forcing_f_train1 = torch.tensor(true_forcing1(X_f_train1), dtype=torch.float32)
+    forcing_f_train2 = torch.tensor(true_forcing2(X_f_train2), dtype=torch.float32)
 
     # Move data to the selected device
     X_u_train = X_u_train.to(device)
+    X_u_train1 = X_u_train1.to(device)
+    X_u_train2 = X_u_train2.to(device)
     # u_train = u_train.to(device)
     u_train1 = u_train1.to(device)
     u_train2 = u_train2.to(device)
-    X_f_train = X_f_train.to(device)
-    X_f_train.requires_grad = True
-    dist_f_train = dist_f_train.to(device)
+    X_f_train1 = X_f_train1.to(device)
+    X_f_train2 = X_f_train2.to(device)
+    X_f_train1.requires_grad = True
+    X_f_train2.requires_grad = True
+    # dist_f_train = dist_f_train.to(device)
+    dist_f_train1 = dist_f_train1.to(device)
+    dist_f_train2 = dist_f_train2.to(device)
     # forcing_f_train = forcing_f_train.to(device)
     forcing_f_train1 = forcing_f_train1.to(device)
     forcing_f_train2 = forcing_f_train2.to(device)
@@ -107,21 +119,24 @@ def main(Nu,Nf,layers,noise_level):
             # compute m first
             x_copy = x.clone()
             m = self.m_compute(x_copy)
-            u2_out = self.forward2(x_copy)
+            # u2_out = self.forward2(x_copy)
             u_out = self.linears[0](x)
             
             for linear in self.linears[1:-1]:
                 u_out = self.activation(linear(u_out))
             u_out = self.linears[-1](u_out)  # No activation on the last layer (u)
-            return u_out,u2_out,m
+            return u_out,m
         
         def forward2(self, x):
             '''This is for ud2. forward if for ud1'''
+            x_copy = x.clone()
+            m = self.m_compute(x_copy)
             u_out = self.linears[0](x)
+
             for linear in self.linears[1:-1]:
                 u_out = self.activation(linear(u_out))
             u_out = self.linears[-1](u_out)
-            return u_out
+            return u_out,m
 
 
         
@@ -137,37 +152,41 @@ def main(Nu,Nf,layers,noise_level):
             m_out = self.linears_m[-1](m_out)  # No activation on the last layer (u)
             return m_out
         
-        def compute_loss(self, x_u, u_true1, u_true2, x_f):
-            x_f.requires_grad = True
+        def compute_loss(self, x_u1, x_u2, u_true1, u_true2, x_f1, x_f2):
+            # x_f.requires_grad = True
+            x_f1.requires_grad = True
+            x_f2.requires_grad = True
             # Calculate u from the network at boundary points and collocation points
-            u_f_pred, u2_f_pred, m_pred = self.forward(x_f)
+            u_f_pred, m_pred1 = self.forward(x_f1)
+            u2_f_pred, m_pred2 = self.forward2(x_f2)
             self.u_f_pred = u_f_pred
             self.u2_f_pred = u2_f_pred
-            self.m_pred = m_pred
+            self.m_pred1 = m_pred1
             
             # Compute f (similar to TensorFlow implementation)
-            u_f_pred_grads = torch.autograd.grad(u_f_pred, x_f, grad_outputs=torch.ones_like(u_f_pred), retain_graph=True, create_graph=True)[0]
-            u_f_pred_xx = torch.autograd.grad(torch.exp(m_pred) * u_f_pred_grads, x_f, grad_outputs=torch.ones_like(u_f_pred_grads[:,[0]]), create_graph=True)[0]
+            u_f_pred_grads = torch.autograd.grad(u_f_pred, x_f1, grad_outputs=torch.ones_like(u_f_pred), retain_graph=True, create_graph=True)[0]
+            u_f_pred_xx = torch.autograd.grad(torch.exp(m_pred1) * u_f_pred_grads, x_f1, grad_outputs=torch.ones_like(u_f_pred_grads[:,[0]]), create_graph=True)[0]
 
             # compute residual for u1
             rhs = forcing_f_train1
             # f_pred = - u_f_pred_xx + omega * dist_f_train * u_f_pred - rhs
-            f1_pred = - u_f_pred_xx + omega * dist_f_train * u_f_pred - rhs
+            f1_pred = - u_f_pred_xx + omega * dist_f_train1 * u_f_pred - rhs
             loss_f1 = self.loss_function(f1_pred, torch.zeros_like(f1_pred)) # residual loss
 
 
-            u2_f_pred_grads = torch.autograd.grad(u2_f_pred, x_f, grad_outputs=torch.ones_like(u2_f_pred), retain_graph=True, create_graph=True)[0]
-            u2_f_pred_xx = torch.autograd.grad(torch.exp(m_pred) * u2_f_pred_grads, x_f, grad_outputs=torch.ones_like(u2_f_pred_grads[:,[0]]), create_graph=True)[0]
+            u2_f_pred_grads = torch.autograd.grad(u2_f_pred, x_f2, grad_outputs=torch.ones_like(u2_f_pred), retain_graph=True, create_graph=True)[0]
+            u2_f_pred_xx = torch.autograd.grad(torch.exp(m_pred2) * u2_f_pred_grads, x_f2, grad_outputs=torch.ones_like(u2_f_pred_grads[:,[0]]), create_graph=True)[0]
 
             # compute the residual of u2
             rhs2 = forcing_f_train2
-            f2_pred = - u2_f_pred_xx + omega * dist_f_train * u2_f_pred - rhs2
+            f2_pred = - u2_f_pred_xx + omega * dist_f_train2 * u2_f_pred - rhs2
             
             # Calculate the loss
             # loss_f = self.loss_function(f_pred, torch.zeros_like(f_pred)) # residual loss
             loss_f2 = self.loss_function(f2_pred, torch.zeros_like(f2_pred))
 
-            u_pred, u2_pred, _ = self.forward(x_u)
+            u_pred, _ = self.forward(x_u1)
+            u2_pred, _ = self.forward2(x_u2)
             # loss_u = self.loss_function(u_pred, u_true) # boundary loss
             loss_u1 = self.loss_function(u_pred, u_true1)
             loss_u2 = self.loss_function(u2_pred, u_true2)
@@ -176,7 +195,7 @@ def main(Nu,Nf,layers,noise_level):
 
             return loss, loss_f1 , loss_f2 , loss_u1 , loss_u2
 
-        def training_step(self, x_u, u_true1, u_true2, x_f, epochs, lr, log_path):
+        def training_step(self, x_u1, x_u2, u_true1, u_true2, x_f1, x_f2, epochs, lr, log_path):
             # Move model to the selected device
             self.to(device) 
             # adam optimizer
@@ -199,13 +218,14 @@ def main(Nu,Nf,layers,noise_level):
                 #     self.betas = [1.0, 0.0]
                 # else: 
                 #     self.betas = [0.0, 1.0]
-                loss, loss_f1 , loss_f2 , loss_u1 , loss_u2 = self.compute_loss(x_u, u_true1, u_true2, x_f)
+                loss, loss_f1 , loss_f2 , loss_u1 , loss_u2 = self.compute_loss(x_u1, x_u2, u_true1, u_true2, x_f1, x_f2)
                 # save the best models before updating the parameters
 
                 if loss < self.best_loss:
                     self.best_loss = loss
                     self.best_model = deepcopy(self.state_dict())
-                    self.best_u1, self.best_u2, self.best_m = self.forward(x_u)
+                    self.best_u1, self.best_m = self.forward(X_u_train)
+                    self.best_u2, _ = self.forward2(X_u_train)
 
                 loss.backward()
                 optimizer.step()
@@ -219,7 +239,8 @@ def main(Nu,Nf,layers,noise_level):
                     with open(log_path, 'a') as file:
                         self.eval()
                         with torch.no_grad():
-                            u1,u2,m = self.forward(x_u)
+                            u1,m = self.forward(X_u_train)
+                            u2,_ = self.forward2(X_u_train)
 
                         writer = csv.writer(file)
                         writer.writerow([epoch+1, loss_u1.item(), loss_u2.item(),loss_f1.item(),loss_f2.item(),loss.item(),end_time - start_time,m.detach().cpu().tolist(),u1.detach().cpu().tolist(),u2.detach().cpu().tolist()])
@@ -234,7 +255,7 @@ def main(Nu,Nf,layers,noise_level):
     from datetime import datetime
     now = datetime.now()
     dt_string = now.strftime("%Y%m%d-%H%M%S")
-    dir_name = f"PINN_results_noise{int(noise_level*100)}_{dt_string}"
+    dir_name = f"Double_data_wider_shallower_PINN_results_noise{int(noise_level*100)}_{dt_string}"
     # path_ = f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/poodle_2m_run_1p_noise/Nu_{Nu}_Nf_{Nf}/{dir_name}'
     # path_ = f'/Users/alexho/Dropbox/2024_spring/PINN_testing/Pytorch_PINN/Model_Discovery/log/poodle_2m_run_1p_noise/Nu_{Nu}_Nf_{Nf}/{dir_name}'
     path_ = f'/home/aho38/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/TEST_transfer-learning_double_data_runs/Nu_{Nu}_Nf_{Nf}/{dir_name}'
@@ -244,23 +265,25 @@ def main(Nu,Nf,layers,noise_level):
 
 
     # layers = [1, 50, 50, 50, 50, 50, 50, 1]
-    betas = [1.0, 0.0]
+    betas = [1.0, 1.0]
     model = PINN(layers,betas)
     model.to(device)
-    epochs = 10000
+    epochs = 500000
     learning_rate = 1e-4
 
     # training first with beta1 = 1 and beta 2 = 0
     start_time = time.time()
-    model.training_step(X_u_train, u_train1, u_train2, X_f_train, epochs, learning_rate, log_path)
+    # model.training_step(X_u_train, u_train1, u_train2, X_f_train, epochs, learning_rate, log_path)
+    model.training_step(X_u_train1, X_u_train2, u_train1, u_train2, X_f_train1, X_f_train2, epochs, learning_rate, log_path)
     Adam_time = time.time() - start_time
     print('Training time: {:.4f} seconds'.format((Adam_time)))
 
-    model.betas = [0.0, 1.0]
-    start_time = time.time()
-    model.training_step(X_u_train, u_train1, u_train2, X_f_train, epochs, learning_rate, log_path)
-    Adam_time = time.time() - start_time
-    print('Training time: {:.4f} seconds'.format((Adam_time)))
+    # model.betas = [0.0, 1.0]
+    # start_time = time.time()
+    # model.training_step(X_u_train, u_train1, u_train2, X_f_train, epochs, learning_rate, log_path)
+    # model.training_step(X_u_train1, X_u_train2, u_train1, u_train2, X_f_train1, X_f_train2, epochs, learning_rate, log_path)
+    # Adam_time = time.time() - start_time
+    # print('Training time: {:.4f} seconds'.format((Adam_time)))
 
     # Continue training with betas as 0.5s
     # model.betas = [0.8, 0.2]
@@ -281,16 +304,18 @@ def main(Nu,Nf,layers,noise_level):
     optimizer = torch.optim.LBFGS(model.parameters(), lr=1, tolerance_grad=1e-10, history_size=100, line_search_fn="strong_wolfe")
     def closure():
         optimizer.zero_grad()
-        loss, loss_f1 , loss_f2 , loss_u1 , loss_u2 = model.compute_loss(X_u_train, u_train1, u_train2, X_f_train)
+        # loss, loss_f1 , loss_f2 , loss_u1 , loss_u2 = model.compute_loss(X_u_train, u_train1, u_train2, X_f_train)
+        loss, loss_f1 , loss_f2 , loss_u1 , loss_u2 = model.compute_loss(X_u_train1, X_u_train2, u_train1, u_train2, X_f_train1, X_f_train2)
         loss.backward()
         return loss
     for lbfgs_iter in range(1):
         optimizer.step(closure)
-        loss, loss_f1 , loss_f2 , loss_u1 , loss_u2 = model.compute_loss(X_u_train, u_train1, u_train2, X_f_train)
+        loss, loss_f1 , loss_f2 , loss_u1 , loss_u2 = model.compute_loss(X_u_train1, X_u_train2, u_train1, u_train2, X_f_train1, X_f_train2)
         if loss < model.best_loss:
             model.best_loss = loss
             model.best_model = deepcopy(model.state_dict())
-            model.best_u1, model.best_u2, model.best_m = model.forward(X_u_train)
+            model.best_u1, model.best_m = model.forward(X_u_train)
+            model.best_u2, _ = model.forward2(X_u_train)
         print(f"LBFGS: loss_misfit1: {loss_u1.item():1.2e}, loss_misfit2: {loss_u2.item():1.2e}, loss_f1: {loss_f1.item():1.2e}, loss_f2: {loss_f2.item():1.2e}, loss: {loss.item():1.2e}")
         # print(f"LBFGS: Loss_misfit: {loss_u.item():1.2e}, loss_f: {loss_f.item():1.2e}, loss: {loss.item():1.2e} , exp(m): {np.exp(model.m.item()):.5f}")
     LBFGS_time = time.time() - start_time1
@@ -300,6 +325,8 @@ def main(Nu,Nf,layers,noise_level):
     # u, m = model.forward(X_u_train)
     # u, m = model.best_u, model.best_m
     u1, u2, m = model.best_u1, model.best_u2, model.best_m
+    # u_train1 = torch.tensor(true_solution1(X_u_train), dtype=torch.float32)
+    # u_train2 = torch.tensor(true_solution2(X_u_train), dtype=torch.float32)
 
     # define results dict
     #fig, ax = plt.subplots(1,3, figsize=(18, 5))
@@ -345,7 +372,7 @@ if __name__ == "__main__":
                 #    [1, 15, 15, 15, 15, 15, 15, 15, 1],
                 #    [1, 50, 50, 50, 50, 50, 1],
                    [1, 50, 50, 50, 50, 1],
-                    # [1, 50, 50, 50, 1],
+                #    [1, 50, 50, 50, 1],
                 #   [1, 40, 40, 40, 40, 40,1],
                     ]
 
@@ -355,7 +382,7 @@ if __name__ == "__main__":
 
     for layers in layers_list:
 
-        main(32,1000, layers, noise_level)
-        # main(64,1000, layers, noise_level)
+        # main(32,1000, layers, noise_level)
+        main(64,1000, layers, noise_level)
         # main(256,1000, layers, noise_level)
         # main(512,1000, layers, noise_level)
