@@ -56,8 +56,8 @@ def main(Nu,Nf,layers,noise_level):
     u_train2 += torch.randn(u_train2.shape) * abs(u_train2).max() * noise_level
 
 
-    X_f_train1 = torch.tensor(lhs(1, Nf), dtype=torch.float32)
-    X_f_train2 = torch.tensor(lhs(1, Nf), dtype=torch.float32)
+    X_f_train1 = X_f_train2 = torch.tensor(lhs(1, Nf), dtype=torch.float32)
+    # X_f_train2 = torch.tensor(lhs(1, Nf), dtype=torch.float32)
     dist_f_train1 = torch.tensor(true_dist(X_f_train1), dtype=torch.float32)
     dist_f_train2 = torch.tensor(true_dist(X_f_train2), dtype=torch.float32)
     # forcing_f_train = torch.tensor(true_forcing(X_f_train), dtype=torch.float32)
@@ -92,7 +92,8 @@ def main(Nu,Nf,layers,noise_level):
             self.loss_function = nn.MSELoss()
 
             # Neural Network
-            self.linears = nn.ModuleList([nn.Linear(layers[i], layers[i + 1]) for i in range(len(layers) - 1)])
+            self.linears_1 = nn.ModuleList([nn.Linear(layers[i], layers[i + 1]) for i in range(len(layers) - 1)])
+            self.linears_2 = nn.ModuleList([nn.Linear(layers[i], layers[i + 1]) for i in range(len(layers) - 1)])
             self.linears_m = nn.ModuleList([nn.Linear(layers[i], layers[i + 1]) for i in range(len(layers) - 1)]) # separate NN for m since m varies spatially
             self.activation = nn.Tanh()
             
@@ -102,11 +103,14 @@ def main(Nu,Nf,layers,noise_level):
             # self.m = torch.tensor(0.0, dtype=torch.float32)
 
             # Xavier Initialization
-            for i in range(len(self.linears)):
-                nn.init.xavier_normal_(self.linears[i].weight.data, gain=1.0)
+            for i in range(len(self.linears_1)):
+                nn.init.xavier_normal_(self.linears_1[i].weight.data, gain=1.0)
+                nn.init.xavier_normal_(self.linears_2[i].weight.data, gain=1.0)
                 nn.init.xavier_normal_(self.linears_m[i].weight.data, gain=1.0)
-                if self.linears[i].bias is not None:
-                    nn.init.zeros_(self.linears[i].bias.data)
+                if self.linears_1[i].bias is not None:
+                    nn.init.zeros_(self.linears_1[i].bias.data)
+                if self.linears_2[i].bias is not None:
+                    nn.init.zeros_(self.linears_2[i].bias.data)
                 if self.linears_m[i].bias is not None:
                     nn.init.zeros_(self.linears_m[i].bias.data)
         
@@ -120,22 +124,22 @@ def main(Nu,Nf,layers,noise_level):
             x_copy = x.clone()
             m = self.m_compute(x_copy)
             # u2_out = self.forward2(x_copy)
-            u_out = self.linears[0](x)
+            u_out = self.linears_1[0](x)
             
-            for linear in self.linears[1:-1]:
+            for linear in self.linears_1[1:-1]:
                 u_out = self.activation(linear(u_out))
-            u_out = self.linears[-1](u_out)  # No activation on the last layer (u)
+            u_out = self.linears_1[-1](u_out)  # No activation on the last layer (u)
             return u_out,m
         
         def forward2(self, x):
             '''This is for ud2. forward if for ud1'''
             x_copy = x.clone()
             m = self.m_compute(x_copy)
-            u_out = self.linears[0](x)
+            u_out = self.linears_2[0](x)
 
-            for linear in self.linears[1:-1]:
+            for linear in self.linears_2[1:-1]:
                 u_out = self.activation(linear(u_out))
-            u_out = self.linears[-1](u_out)
+            u_out = self.linears_2[-1](u_out)
             return u_out,m
 
 
@@ -255,32 +259,35 @@ def main(Nu,Nf,layers,noise_level):
     from datetime import datetime
     now = datetime.now()
     dt_string = now.strftime("%Y%m%d-%H%M%S")
-    dir_name = f"Double_data_wider_shallower_PINN_results_noise{int(noise_level*100)}_{dt_string}"
+    dir_name = f"PINN_results_noise{int(noise_level*100)}_{dt_string}"
     # path_ = f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/poodle_2m_run_1p_noise/Nu_{Nu}_Nf_{Nf}/{dir_name}'
     # path_ = f'/Users/alexho/Dropbox/2024_spring/PINN_testing/Pytorch_PINN/Model_Discovery/log/poodle_2m_run_1p_noise/Nu_{Nu}_Nf_{Nf}/{dir_name}'
-    path_ = f'/home/aho38/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/TEST_transfer-learning_double_data_runs/Nu_{Nu}_Nf_{Nf}/{dir_name}'
+    path_ = f'/home/aho38/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/TEST_with_corrected_linear_layers_transfer-learning_double_data_runs/Nu_{Nu}_Nf_{Nf}/{dir_name}'
     save_path = increment_path(path_, mkdir=True)
 
     log_path = f'{save_path}/opt_log.csv'
 
 
     # layers = [1, 50, 50, 50, 50, 50, 50, 1]
-    betas = [1.0, 1.0]
+    betas = [0.5, 0.5]
     model = PINN(layers,betas)
+    # print(PINN)
     model.to(device)
-    epochs = 500000
+    epochs = 2000000
     learning_rate = 1e-4
 
     # training first with beta1 = 1 and beta 2 = 0
     start_time = time.time()
+    # for param in model.linears_1.parameters():
+    #    param.requires_grad = False
     # model.training_step(X_u_train, u_train1, u_train2, X_f_train, epochs, learning_rate, log_path)
     model.training_step(X_u_train1, X_u_train2, u_train1, u_train2, X_f_train1, X_f_train2, epochs, learning_rate, log_path)
     Adam_time = time.time() - start_time
     print('Training time: {:.4f} seconds'.format((Adam_time)))
 
-    # model.betas = [0.0, 1.0]
+    # model.betas = [0.5, 0.5]
     # start_time = time.time()
-    # model.training_step(X_u_train, u_train1, u_train2, X_f_train, epochs, learning_rate, log_path)
+    # # model.training_step(X_u_train, u_train1, u_train2, X_f_train, epochs, learning_rate, log_path)
     # model.training_step(X_u_train1, X_u_train2, u_train1, u_train2, X_f_train1, X_f_train2, epochs, learning_rate, log_path)
     # Adam_time = time.time() - start_time
     # print('Training time: {:.4f} seconds'.format((Adam_time)))
@@ -365,7 +372,7 @@ def main(Nu,Nf,layers,noise_level):
 if __name__ == "__main__":
     Nu_list = [64, 128, 256, 512, 1024,2048]
     Nf_list = [1000,5000,10000]
-    noise_level = 0.00
+    noise_level = 0.03
 
     layers_list = [
                 #    [1, 20, 20, 20, 20, 20, 20, 20, 1],
@@ -383,6 +390,7 @@ if __name__ == "__main__":
     for layers in layers_list:
 
         # main(32,1000, layers, noise_level)
-        main(64,1000, layers, noise_level)
+        # main(64,1000, layers, noise_level)
+        main(128,1000,layers, noise_level)
         # main(256,1000, layers, noise_level)
         # main(512,1000, layers, noise_level)
