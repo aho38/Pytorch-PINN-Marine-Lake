@@ -15,9 +15,10 @@ file_path = os.getcwd()
 a, b = 0.0, 1.0
 
 # Load True Solution and paramters
-df = pd.read_csv(f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data.csv')
-x_array, mtrue_array, utrue_array = np.array(df['x']), np.array(df['mtrue']), np.array(df['utrue'])
-forcing_array, dist_array = np.array(df['forcing']), np.array(df['distribution'])
+# df = pd.read_csv(f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data.csv')
+df = pd.read_csv(f'/home/aho38/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
+x_array, mtrue_array, utrue_array = np.array(df['x']), np.array(df['mtrue']), np.array(df['utrue2'])
+forcing_array, dist_array = np.array(df['g2']), np.array(df['distribution'])
 omega = np.array(df['omega'])[0]
 
 from scipy.interpolate import interp1d
@@ -176,7 +177,7 @@ def main(Nu,Nf,layers):
     now = datetime.now()
     dt_string = now.strftime("%Y%m%d-%H%M%S")
     dir_name = f"PINN_results_{dt_string}"
-    path_ = f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/2m_run_1p_noise/Nu_{Nu}_Nf_{Nf}/{dir_name}'
+    path_ = f'/home/aho38/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/NBC_test_with_single_data/Nu_{Nu}_Nf_{Nf}/{dir_name}'
     save_path = increment_path(path_, mkdir=True)
 
     log_path = f'{save_path}/opt_log.csv'
@@ -185,7 +186,7 @@ def main(Nu,Nf,layers):
     # layers = [1, 50, 50, 50, 50, 50, 50, 1]
     model = PINN(layers)
     model.to(device)
-    epochs = 2000000
+    epochs = 1000000
     learning_rate = 1e-4
 
     start_time = time.time()
