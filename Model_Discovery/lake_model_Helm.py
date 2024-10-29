@@ -26,6 +26,7 @@ forcing1_array, forcing2_array, dist_array = np.array(df['g1']), np.array(df['g2
 omega = np.array(df['omega'])[0]
 
 from scipy.interpolate import interp1d
+true_m = interp1d(x_array, mtrue_array)
 # true_solution = interp1d(x_array, utrue_array)
 true_solution1 = interp1d(x_array, utrue1_array)
 true_solution2 = interp1d(x_array, utrue2_array)
@@ -44,9 +45,11 @@ def main(Nu,Nf,layers,noise_level):
     X_u_train = torch.linspace(a,b, Nu, dtype=torch.float32)[:, None]
     # X_u_train1 = torch.linspace((b-a)/2 + a,b, Nu, dtype=torch.float32)[:, None]
     # X_u_train2 = torch.linspace(a,(b-a)/2 + a, Nu, dtype=torch.float32)[:, None]
+    X_m_boundary = torch.tensor([a,b], dtype=torch.float32)[:, None]
     X_u_train1 = torch.linspace(a,b, Nu, dtype=torch.float32)[:, None]
     X_u_train2 = torch.linspace(a,b, Nu, dtype=torch.float32)[:, None]
     # u_train = torch.tensor(true_solution(X_u_train), dtype=torch.float32)
+    m_bc = torch.tensor(true_m(X_m_boundary), dtype=torch.float32)
     u_train1 = torch.tensor(true_solution1(X_u_train1), dtype=torch.float32)
     u_train2 = torch.tensor(true_solution2(X_u_train2), dtype=torch.float32)
     #noise_level = 0.0
@@ -65,10 +68,12 @@ def main(Nu,Nf,layers,noise_level):
     forcing_f_train2 = torch.tensor(true_forcing2(X_f_train2), dtype=torch.float32)
 
     # Move data to the selected device
+    X_m_boundary = X_m_boundary.to(device)
     X_u_train = X_u_train.to(device)
     X_u_train1 = X_u_train1.to(device)
     X_u_train2 = X_u_train2.to(device)
     # u_train = u_train.to(device)
+    m_bc = m_bc.to(device)
     u_train1 = u_train1.to(device)
     u_train2 = u_train2.to(device)
     X_f_train1 = X_f_train1.to(device)
@@ -281,7 +286,7 @@ def main(Nu,Nf,layers,noise_level):
     # for param in model.linears_1.parameters():
     #    param.requires_grad = False
     # model.training_step(X_u_train, u_train1, u_train2, X_f_train, epochs, learning_rate, log_path)
-    model.training_step(X_u_train1, X_u_train2, u_train1, u_train2, X_f_train1, X_f_train2, epochs, learning_rate, log_path)
+    model.training_step(X_u_train1, X_u_train2, u_train1, u_train2, X_f_train1, X_f_train2, epochs, learning_rate, log_path, X_m_boundary, m_bc)
     Adam_time = time.time() - start_time
     print('Training time: {:.4f} seconds'.format((Adam_time)))
 
