@@ -19,8 +19,8 @@ a, b = 0.0, 1.0
 # Load True Solution and paramters
 # df = pd.read_csv(f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data.csv')
 # df = pd.read_csv(f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
-# df = pd.read_csv(f'/Users/alexho/Dropbox/2024_spring/PINN_testing/Pytorch_PINN/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
-df = pd.read_csv('/home/aho38/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
+df = pd.read_csv(f'/Users/alexho/Dropbox/2024_spring/PINN_testing/Pytorch_PINN/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
+# df = pd.read_csv('/home/aho38/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
 x_array, mtrue_array, utrue1_array, utrue2_array = np.array(df['x']), np.array(df['mtrue']), np.array(df['utrue1']), np.array(df['utrue2'])
 forcing1_array, forcing2_array, dist_array = np.array(df['g1']), np.array(df['g2']), np.array(df['distribution'])
 omega = np.array(df['omega'])[0]
@@ -161,7 +161,7 @@ def main(Nu,Nf,layers,noise_level):
             m_out = self.linears_m[-1](m_out)  # No activation on the last layer (u)
             return m_out
         
-        def compute_loss(self, x_u1, x_u2, u_true1, u_true2, x_f1, x_f2):
+        def compute_loss(self, x_u1, x_u2, u_true1, u_true2, x_f1, x_f2, x_m_bc, m_bc):
             # x_f.requires_grad = True
             x_f1.requires_grad = True
             x_f2.requires_grad = True
@@ -199,12 +199,17 @@ def main(Nu,Nf,layers,noise_level):
             # loss_u = self.loss_function(u_pred, u_true) # boundary loss
             loss_u1 = self.loss_function(u_pred, u_true1)
             loss_u2 = self.loss_function(u2_pred, u_true2)
+
+            # Compute loss for m bc
+            m_bc_pred = self.m_compute(x_m_bc)
+            loss_m_bc = self.loss_function(m_bc_pred, m_bc)
+
             # loss = loss_f + loss_u
-            loss = (loss_f1 + loss_u1)*self.betas[0] + (loss_f2 + loss_u2)*self.betas[1]
+            loss = (loss_f1 + loss_u1)*self.betas[0] + (loss_f2 + loss_u2)*self.betas[1] + loss_m_bc*self.betas[2]
 
-            return loss, loss_f1 , loss_f2 , loss_u1 , loss_u2
+            return loss, loss_f1 , loss_f2 , loss_u1 , loss_u2, loss_m_bc
 
-        def training_step(self, x_u1, x_u2, u_true1, u_true2, x_f1, x_f2, epochs, lr, log_path):
+        def training_step(self, x_u1, x_u2, u_true1, u_true2, x_f1, x_f2, epochs, lr, log_path, x_m_bc, m_bc):
             # Move model to the selected device
             self.to(device) 
             # adam optimizer
@@ -217,7 +222,7 @@ def main(Nu,Nf,layers,noise_level):
             else:
                 with open(log_path, 'w') as f:
                     writer = csv.writer(f)
-                    writer.writerow(['epoch', 'loss_misfit1', 'loss_misfit2', 'loss_f1', 'loss_f2', 'loss', 'run_time', 'm_sol', 'u_sol1', 'u_sol2'])
+                    writer.writerow(['epoch', 'loss_misfit1', 'loss_misfit2', 'loss_f1', 'loss_f2', 'loss_mbc', 'loss', 'run_time', 'm_sol', 'u_sol1', 'u_sol2'])
             
             start_time = time.time()
             for epoch in range(epochs): # loop over the dataset multiple times
@@ -227,7 +232,7 @@ def main(Nu,Nf,layers,noise_level):
                 #     self.betas = [1.0, 0.0]
                 # else: 
                 #     self.betas = [0.0, 1.0]
-                loss, loss_f1 , loss_f2 , loss_u1 , loss_u2 = self.compute_loss(x_u1, x_u2, u_true1, u_true2, x_f1, x_f2)
+                loss, loss_f1 , loss_f2 , loss_u1 , loss_u2, loss_m_bc = self.compute_loss(x_u1, x_u2, u_true1, u_true2, x_f1, x_f2, x_m_bc, m_bc)
                 # save the best models before updating the parameters
 
                 if loss < self.best_loss:
@@ -242,7 +247,7 @@ def main(Nu,Nf,layers,noise_level):
                 
                 if (epoch+1) % 100 == 0: # Print the loss every 100 epochs
                     end_time = time.time()
-                    print(f"Epoch {(epoch+1)}, loss_misfit1: {loss_u1.item():1.2e}, loss_misfit2: {loss_u2.item():1.2e}, loss_f1: {loss_f1.item():1.2e}, loss_f2: {loss_f2.item():1.2e}, loss: {loss.item():1.2e}, best_loss: {self.best_loss.item():1.2e}, run time: {end_time - start_time}s")
+                    print(f"Epoch {(epoch+1)}, loss_misfit1: {loss_u1.item():1.2e}, loss_misfit2: {loss_u2.item():1.2e}, loss_f1: {loss_f1.item():1.2e}, loss_f2: {loss_f2.item():1.2e}, loss_mbc: {loss_m_bc.item():1.2e}, loss: {loss.item():1.2e}, best_loss: {self.best_loss.item():1.2e}, run time: {end_time - start_time}s")
 
 
                     with open(log_path, 'a') as file:
@@ -252,7 +257,7 @@ def main(Nu,Nf,layers,noise_level):
                             u2,_ = self.forward2(X_u_train)
 
                         writer = csv.writer(file)
-                        writer.writerow([epoch+1, loss_u1.item(), loss_u2.item(),loss_f1.item(),loss_f2.item(),loss.item(),end_time - start_time,m.detach().cpu().tolist(),u1.detach().cpu().tolist(),u2.detach().cpu().tolist()])
+                        writer.writerow([epoch+1, loss_u1.item(), loss_u2.item(),loss_f1.item(),loss_f2.item(),loss_m_bc.item(),loss.item(),end_time - start_time,m.detach().cpu().tolist(),u1.detach().cpu().tolist(),u2.detach().cpu().tolist()])
     
                     start_time = time.time()
     
@@ -266,15 +271,15 @@ def main(Nu,Nf,layers,noise_level):
     dt_string = now.strftime("%Y%m%d-%H%M%S")
     dir_name = f"PINN_results_noise{int(noise_level*100)}_{dt_string}"
     # path_ = f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/poodle_2m_run_1p_noise/Nu_{Nu}_Nf_{Nf}/{dir_name}'
-    # path_ = f'/Users/alexho/Dropbox/2024_spring/PINN_testing/Pytorch_PINN/Model_Discovery/log/poodle_2m_run_1p_noise/Nu_{Nu}_Nf_{Nf}/{dir_name}'
-    path_ = f'/home/aho38/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/TEST_with_corrected_linear_layers_transfer-learning_double_data_runs/Nu_{Nu}_Nf_{Nf}/{dir_name}'
+    path_ = f'/Users/alexho/Dropbox/2024_spring/PINN_testing/Pytorch_PINN/Model_Discovery/log/debug_delete_later/Nu_{Nu}_Nf_{Nf}/{dir_name}'
+    # path_ = f'/home/aho38/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/TEST_with_corrected_linear_layers_transfer-learning_double_data_runs/Nu_{Nu}_Nf_{Nf}/{dir_name}'
     save_path = increment_path(path_, mkdir=True)
 
     log_path = f'{save_path}/opt_log.csv'
 
 
     # layers = [1, 50, 50, 50, 50, 50, 50, 1]
-    betas = [0.5, 0.5]
+    betas = [1.0, 1.0, 1.0]
     model = PINN(layers,betas)
     # print(PINN)
     model.to(device)
@@ -317,18 +322,18 @@ def main(Nu,Nf,layers,noise_level):
     def closure():
         optimizer.zero_grad()
         # loss, loss_f1 , loss_f2 , loss_u1 , loss_u2 = model.compute_loss(X_u_train, u_train1, u_train2, X_f_train)
-        loss, loss_f1 , loss_f2 , loss_u1 , loss_u2 = model.compute_loss(X_u_train1, X_u_train2, u_train1, u_train2, X_f_train1, X_f_train2)
+        loss, loss_f1 , loss_f2 , loss_u1 , loss_u2, loss_m_bc = model.compute_loss(X_u_train1, X_u_train2, u_train1, u_train2, X_f_train1, X_f_train2, X_m_boundary, m_bc)
         loss.backward()
         return loss
     for lbfgs_iter in range(1):
         optimizer.step(closure)
-        loss, loss_f1 , loss_f2 , loss_u1 , loss_u2 = model.compute_loss(X_u_train1, X_u_train2, u_train1, u_train2, X_f_train1, X_f_train2)
+        loss, loss_f1 , loss_f2 , loss_u1 , loss_u2, loss_m_bc = model.compute_loss(X_u_train1, X_u_train2, u_train1, u_train2, X_f_train1, X_f_train2, X_m_boundary, m_bc)
         if loss < model.best_loss:
             model.best_loss = loss
             model.best_model = deepcopy(model.state_dict())
             model.best_u1, model.best_m = model.forward(X_u_train)
             model.best_u2, _ = model.forward2(X_u_train)
-        print(f"LBFGS: loss_misfit1: {loss_u1.item():1.2e}, loss_misfit2: {loss_u2.item():1.2e}, loss_f1: {loss_f1.item():1.2e}, loss_f2: {loss_f2.item():1.2e}, loss: {loss.item():1.2e}")
+        print(f"LBFGS: loss_misfit1: {loss_u1.item():1.2e}, loss_misfit2: {loss_u2.item():1.2e}, loss_f1: {loss_f1.item():1.2e}, loss_f2: {loss_f2.item():1.2e}, loss_mbc: {loss_m_bc.item():1.2e}, loss: {loss.item():1.2e}")
         # print(f"LBFGS: Loss_misfit: {loss_u.item():1.2e}, loss_f: {loss_f.item():1.2e}, loss: {loss.item():1.2e} , exp(m): {np.exp(model.m.item()):.5f}")
     LBFGS_time = time.time() - start_time1
     print('LBFGS time: {:.4f} seconds'.format((LBFGS_time)))
