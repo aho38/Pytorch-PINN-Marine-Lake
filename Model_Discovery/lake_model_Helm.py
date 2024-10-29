@@ -390,7 +390,7 @@ if __name__ == "__main__":
     for layers in layers_list:
 
         # main(32,1000, layers, noise_level)
-        # main(64,1000, layers, noise_level)
-        main(128,1000,layers, noise_level)
+        main(64,1000, layers, noise_level)
+        # main(128,1000,layers, noise_level)
         # main(256,1000, layers, noise_level)
         # main(512,1000, layers, noise_level)
