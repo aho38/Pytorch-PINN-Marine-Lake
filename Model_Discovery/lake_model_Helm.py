@@ -19,10 +19,11 @@ a, b = 0.0, 1.0
 # Load True Solution and paramters
 # df = pd.read_csv(f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data.csv')
 # df = pd.read_csv(f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
-df = pd.read_csv(f'/Users/alexho/Dropbox/2024_spring/PINN_testing/Pytorch_PINN/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
-# df = pd.read_csv('/home/aho38/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
+# df = pd.read_csv(f'/Users/alexho/Dropbox/2024_spring/PINN_testing/Pytorch_PINN/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
+df = pd.read_csv('/home/aho38/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
 x_array, mtrue_array, utrue1_array, utrue2_array = np.array(df['x']), np.array(df['mtrue']), np.array(df['utrue1']), np.array(df['utrue2'])
 forcing1_array, forcing2_array, dist_array = np.array(df['g1']), np.array(df['g2']), np.array(df['distribution'])
+u1_noise, u2_noise = np.array(df['u1_noise']), np.array(df['u2_noise'])
 omega = np.array(df['omega'])[0]
 
 from scipy.interpolate import interp1d
@@ -35,6 +36,8 @@ true_dist = interp1d(x_array, dist_array)
 true_forcing1 = interp1d(x_array, forcing1_array)
 true_forcing2 = interp1d(x_array, forcing2_array)
 omega = torch.tensor(omega, dtype=torch.float32, device=device)
+u1_noise_interp = interp1d(x_array, u1_noise)
+u2_noise_interp = interp1d(x_array, u2_noise)
 
 
 
@@ -52,11 +55,13 @@ def main(Nu,Nf,layers,noise_level):
     m_bc = torch.tensor(true_m(X_m_boundary), dtype=torch.float32)
     u_train1 = torch.tensor(true_solution1(X_u_train1), dtype=torch.float32)
     u_train2 = torch.tensor(true_solution2(X_u_train2), dtype=torch.float32)
+    u_train1_noise = torch.tensor(u1_noise_interp(X_u_train1), dtype=torch.float32)
+    u_train2_noise = torch.tensor(u2_noise_interp(X_u_train2), dtype=torch.float32)
     #noise_level = 0.0
     np.random.seed(0)
     # u_train += torch.randn(u_train.shape) * abs(u_train).max() * noise_level
-    u_train1 += torch.randn(u_train1.shape) * abs(u_train1).max() * noise_level
-    u_train2 += torch.randn(u_train2.shape) * abs(u_train2).max() * noise_level
+    u_train1 += u_train1_noise * noise_level
+    u_train2 += u_train2_noise * noise_level
 
 
     X_f_train1 = X_f_train2 = torch.tensor(lhs(1, Nf), dtype=torch.float32)
@@ -209,7 +214,7 @@ def main(Nu,Nf,layers,noise_level):
 
             return loss, loss_f1 , loss_f2 , loss_u1 , loss_u2, loss_m_bc
 
-        def training_step(self, x_u1, x_u2, u_true1, u_true2, x_f1, x_f2, epochs, lr, log_path, x_m_bc, m_bc):
+        def training_step(self, x_u1, x_u2, u_true1, u_true2, x_f1, x_f2, epochs, lr, log_path, model_save_path, x_m_bc, m_bc):
             # Move model to the selected device
             self.to(device) 
             # adam optimizer
@@ -249,6 +254,8 @@ def main(Nu,Nf,layers,noise_level):
                     end_time = time.time()
                     print(f"Epoch {(epoch+1)}, loss_misfit1: {loss_u1.item():1.2e}, loss_misfit2: {loss_u2.item():1.2e}, loss_f1: {loss_f1.item():1.2e}, loss_f2: {loss_f2.item():1.2e}, loss_mbc: {loss_m_bc.item():1.2e}, loss: {loss.item():1.2e}, best_loss: {self.best_loss.item():1.2e}, run time: {end_time - start_time}s")
 
+                    model_save = deepcopy(self.state_dict())
+                    torch.save(model_save, f'{model_save_path}/model_epoch{epoch+1}.pt')
 
                     with open(log_path, 'a') as file:
                         self.eval()
@@ -271,14 +278,19 @@ def main(Nu,Nf,layers,noise_level):
     dt_string = now.strftime("%Y%m%d-%H%M%S")
     dir_name = f"PINN_results_noise{int(noise_level*100)}_{dt_string}"
     # path_ = f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/poodle_2m_run_1p_noise/Nu_{Nu}_Nf_{Nf}/{dir_name}'
-    path_ = f'/Users/alexho/Dropbox/2024_spring/PINN_testing/Pytorch_PINN/Model_Discovery/log/debug_delete_later/Nu_{Nu}_Nf_{Nf}/{dir_name}'
-    # path_ = f'/home/aho38/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/TEST_with_corrected_linear_layers_transfer-learning_double_data_runs/Nu_{Nu}_Nf_{Nf}/{dir_name}'
+    # path_ = f'/Users/alexho/Dropbox/2024_spring/PINN_testing/Pytorch_PINN/Model_Discovery/log/debug_delete_later/Nu_{Nu}_Nf_{Nf}/{dir_name}'
+    # path_ = f'/home/aho38/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/delete_later/Nu_{Nu}_Nf_{Nf}/{dir_name}'
+    # path_ = f'/home/aho38/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/PINN_results_Helm_with_mbc/Nu_{Nu}_Nf_{Nf}/{dir_name}'
+    path_ = f'/home/aho38/data/log/PINN_results_Helm_with_mbc/Nu_{Nu}_Nf_{Nf}/{dir_name}'
     save_path = increment_path(path_, mkdir=True)
 
     log_path = f'{save_path}/opt_log.csv'
+    model_save_path = f'{save_path}/models'
+    os.mkdir(model_save_path)
 
 
     # layers = [1, 50, 50, 50, 50, 50, 50, 1]
+    #       [u1,  u2,  mbc]
     betas = [1.0, 1.0, 1.0]
     model = PINN(layers,betas)
     # print(PINN)
@@ -291,30 +303,9 @@ def main(Nu,Nf,layers,noise_level):
     # for param in model.linears_1.parameters():
     #    param.requires_grad = False
     # model.training_step(X_u_train, u_train1, u_train2, X_f_train, epochs, learning_rate, log_path)
-    model.training_step(X_u_train1, X_u_train2, u_train1, u_train2, X_f_train1, X_f_train2, epochs, learning_rate, log_path, X_m_boundary, m_bc)
+    model.training_step(X_u_train1, X_u_train2, u_train1, u_train2, X_f_train1, X_f_train2, epochs, learning_rate, log_path, model_save_path, X_m_boundary, m_bc)
     Adam_time = time.time() - start_time
     print('Training time: {:.4f} seconds'.format((Adam_time)))
-
-    # model.betas = [0.5, 0.5]
-    # start_time = time.time()
-    # # model.training_step(X_u_train, u_train1, u_train2, X_f_train, epochs, learning_rate, log_path)
-    # model.training_step(X_u_train1, X_u_train2, u_train1, u_train2, X_f_train1, X_f_train2, epochs, learning_rate, log_path)
-    # Adam_time = time.time() - start_time
-    # print('Training time: {:.4f} seconds'.format((Adam_time)))
-
-    # Continue training with betas as 0.5s
-    # model.betas = [0.8, 0.2]
-    # # start_time = time.time()
-    # model.training_step(X_u_train, u_train1, u_train2, X_f_train, epochs, learning_rate, log_path)
-    # Adam_time = time.time() - start_time
-    # print('Training time: {:.4f} seconds'.format((Adam_time)))
-
-    # Continue training with betas as 0.5s
-    # model.betas = [0.5, 0.5]
-    # # start_time = time.time()
-    # model.training_step(X_u_train, u_train1, u_train2, X_f_train, epochs, learning_rate, log_path)
-    # Adam_time = time.time() - start_time
-    # print('Training time: {:.4f} seconds'.format((Adam_time)))
 
     start_time1 = time.time()
     ## L-BFGS
@@ -377,7 +368,9 @@ def main(Nu,Nf,layers,noise_level):
     # save results and model
     with open(f'{save_path}/results.json', 'w') as f:
         json.dump(results, f, indent=2)
-
+    
+    # save best model
+    torch.save(model.best_model, f'{save_path}/model.pt')
 
 if __name__ == "__main__":
     Nu_list = [64, 128, 256, 512, 1024,2048]
@@ -398,7 +391,8 @@ if __name__ == "__main__":
     #         main(Nu,Nf)
 
     for layers in layers_list:
-
+        # main(8,1000, layers, noise_level)
+        # main(16,1000, layers, noise_level)
         # main(32,1000, layers, noise_level)
         main(64,1000, layers, noise_level)
         # main(128,1000,layers, noise_level)
