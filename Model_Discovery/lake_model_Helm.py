@@ -177,7 +177,7 @@ def main(Nu,Nf,layers,noise_level):
             self.u2_f_pred = u2_f_pred
             self.m_pred1 = m_pred1
             
-            # Compute f (similar to TensorFlow implementation)
+            # Compute f1 (similar to TensorFlow implementation)
             u_f_pred_grads = torch.autograd.grad(u_f_pred, x_f1, grad_outputs=torch.ones_like(u_f_pred), retain_graph=True, create_graph=True)[0]
             u_f_pred_xx = torch.autograd.grad(torch.exp(m_pred1) * u_f_pred_grads, x_f1, grad_outputs=torch.ones_like(u_f_pred_grads[:,[0]]), create_graph=True)[0]
 
@@ -187,7 +187,7 @@ def main(Nu,Nf,layers,noise_level):
             f1_pred = - u_f_pred_xx + omega * dist_f_train1 * u_f_pred - rhs
             loss_f1 = self.loss_function(f1_pred, torch.zeros_like(f1_pred)) # residual loss
 
-
+            # Compute f2
             u2_f_pred_grads = torch.autograd.grad(u2_f_pred, x_f2, grad_outputs=torch.ones_like(u2_f_pred), retain_graph=True, create_graph=True)[0]
             u2_f_pred_xx = torch.autograd.grad(torch.exp(m_pred2) * u2_f_pred_grads, x_f2, grad_outputs=torch.ones_like(u2_f_pred_grads[:,[0]]), create_graph=True)[0]
 
@@ -218,8 +218,15 @@ def main(Nu,Nf,layers,noise_level):
             # Move model to the selected device
             self.to(device) 
             # adam optimizer
-            if not hasattr(self, 'optimizer'):
+            if self.betas[0] == 1 and self.betas[1] == 1:
                 optimizer = torch.optim.Adam(self.parameters(), lr=lr,betas=(0.9, 0.999), eps=1e-07)
+            elif self.betas[0] == 1 and self.betas[1] == 0:
+                params_to_optimize = [param for name, param in self.named_parameters() if ('linears_1' in name) or ('linears_m' in name)]
+                optimizer = torch.optim.Adam(params_to_optimize, lr=lr,betas=(0.9, 0.999), eps=1e-07)
+            elif self.betas[0] == 0 and self.betas[1] == 1:
+                params_to_optimize = [param for name, param in self.named_parameters() if ('linears_2' in name) or ('linears_m' in name)]
+                optimizer = torch.optim.Adam(params_to_optimize, lr=lr,betas=(0.9, 0.999), eps=1e-07)
+
 
             import csv
             if os.path.exists(log_path):
@@ -246,8 +253,6 @@ def main(Nu,Nf,layers,noise_level):
                     self.best_u1, self.best_m = self.forward(X_u_train)
                     self.best_u2, _ = self.forward2(X_u_train)
 
-                loss.backward()
-                optimizer.step()
 
                 
                 if (epoch+1) % 100 == 0: # Print the loss every 100 epochs
@@ -267,7 +272,13 @@ def main(Nu,Nf,layers,noise_level):
                         writer.writerow([epoch+1, loss_u1.item(), loss_u2.item(),loss_f1.item(),loss_f2.item(),loss_m_bc.item(),loss.item(),end_time - start_time,m.detach().cpu().tolist(),u1.detach().cpu().tolist(),u2.detach().cpu().tolist()])
     
                     start_time = time.time()
-    
+
+
+                ##### Update my weights according to my loss fucntions
+                loss.backward()
+                optimizer.step()
+
+
     ## ======== definition of model ends here. Start defining parameter ========
     ## ===================== save model =====================
     import sys
@@ -281,7 +292,7 @@ def main(Nu,Nf,layers,noise_level):
     # path_ = f'/Users/alexho/Dropbox/2024_spring/PINN_testing/Pytorch_PINN/Model_Discovery/log/debug_delete_later/Nu_{Nu}_Nf_{Nf}/{dir_name}'
     # path_ = f'/home/aho38/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/delete_later/Nu_{Nu}_Nf_{Nf}/{dir_name}'
     # path_ = f'/home/aho38/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/PINN_results_Helm_with_mbc/Nu_{Nu}_Nf_{Nf}/{dir_name}'
-    path_ = f'/home/aho38/data/log/PINN_results_Helm_with_mbc/Nu_{Nu}_Nf_{Nf}/{dir_name}'
+    path_ = f'/home/aho38/data/log/NBC_PINN_results_Helm_with_mbc/Nu_{Nu}_Nf_{Nf}/{dir_name}'
     save_path = increment_path(path_, mkdir=True)
 
     log_path = f'{save_path}/opt_log.csv'
@@ -291,7 +302,7 @@ def main(Nu,Nf,layers,noise_level):
 
     # layers = [1, 50, 50, 50, 50, 50, 50, 1]
     #       [u1,  u2,  mbc]
-    betas = [1.0, 1.0, 1.0]
+    betas = [0.0, 1.0, 1.0]
     model = PINN(layers,betas)
     # print(PINN)
     model.to(device)
@@ -300,9 +311,6 @@ def main(Nu,Nf,layers,noise_level):
 
     # training first with beta1 = 1 and beta 2 = 0
     start_time = time.time()
-    # for param in model.linears_1.parameters():
-    #    param.requires_grad = False
-    # model.training_step(X_u_train, u_train1, u_train2, X_f_train, epochs, learning_rate, log_path)
     model.training_step(X_u_train1, X_u_train2, u_train1, u_train2, X_f_train1, X_f_train2, epochs, learning_rate, log_path, model_save_path, X_m_boundary, m_bc)
     Adam_time = time.time() - start_time
     print('Training time: {:.4f} seconds'.format((Adam_time)))
