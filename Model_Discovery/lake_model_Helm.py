@@ -18,6 +18,7 @@ a, b = 0.0, 1.0
 
 # Load True Solution and paramters
 # df = pd.read_csv(f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data.csv')
+
 # df = pd.read_csv(f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
 # df = pd.read_csv(f'/Users/alexho/Dropbox/2024_spring/PINN_testing/Pytorch_PINN/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
 df = pd.read_csv('/home/aho38/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
@@ -288,10 +289,6 @@ def main(Nu,Nf,layers,noise_level):
     now = datetime.now()
     dt_string = now.strftime("%Y%m%d-%H%M%S")
     dir_name = f"PINN_results_noise{int(noise_level*100)}_{dt_string}"
-    # path_ = f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/poodle_2m_run_1p_noise/Nu_{Nu}_Nf_{Nf}/{dir_name}'
-    # path_ = f'/Users/alexho/Dropbox/2024_spring/PINN_testing/Pytorch_PINN/Model_Discovery/log/debug_delete_later/Nu_{Nu}_Nf_{Nf}/{dir_name}'
-    # path_ = f'/home/aho38/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/delete_later/Nu_{Nu}_Nf_{Nf}/{dir_name}'
-    # path_ = f'/home/aho38/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/log/PINN_results_Helm_with_mbc/Nu_{Nu}_Nf_{Nf}/{dir_name}'
     path_ = f'/home/aho38/data/log/NBC_PINN_results_Helm_with_mbc/Nu_{Nu}_Nf_{Nf}/{dir_name}'
     save_path = increment_path(path_, mkdir=True)
 
@@ -306,7 +303,7 @@ def main(Nu,Nf,layers,noise_level):
     model = PINN(layers,betas)
     # print(PINN)
     model.to(device)
-    epochs = 2000000
+    epochs = 1000000
     learning_rate = 1e-4
 
     # training first with beta1 = 1 and beta 2 = 0
