@@ -8,4 +8,9 @@ This repository contains a **Physics-Informed Neural Network (PINN) implementati
 - Implements multiple **boundary conditions** (Dirichlet/Neumann).
 - Compares **PINN-based** inversion with a PDE-constrained optimization method.
 
-## 📁 Repository Structure
+## 🚀 Installation
+To set up the environment and install dependencies, run:
+```bash
+git clone https://github.com/aho38/Pytorch-PINN-Marine-Lake.git
+cd Pytorch-PINN-Marine-Lake
+pip install -r requirements.txt
