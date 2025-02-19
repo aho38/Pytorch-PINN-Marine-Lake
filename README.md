@@ -15,6 +15,3 @@ git clone https://github.com/aho38/Pytorch-PINN-Marine-Lake.git
 cd Pytorch-PINN-Marine-Lake
 pip install -r requirements.txt
 
-## Schematic of Model Recovery
-
-![plot](./Model_Discovery/pinn_schematics2.png)
