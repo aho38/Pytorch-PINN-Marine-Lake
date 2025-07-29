@@ -19,8 +19,14 @@ a, b = 0.0, 1.0
 # Load True Solution and paramters
 # df = pd.read_csv(f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data.csv')
 # df = pd.read_csv(f'/g/g20/ho32/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
-# df = pd.read_csv(f'/Users/alexho/Dropbox/2024_spring/PINN_testing/Pytorch_PINN/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
-df = pd.read_csv('/home/aho38/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
+df = pd.read_csv(f'/Users/alexho/Dropbox/2024_spring/PINN_testing/Pytorch_PINN/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
+df_data_for_paper = pd.read_csv(f'/Users/alexho/Dropbox/2024_spring/PINN_testing/Pytorch_PINN/Model_Discovery/synthetic_data/synthetic_data_double_data_for_paper.csv')
+x_paper, ud1_paper, ud2_paper = np.array(df_data_for_paper['x']), np.array(df_data_for_paper['ud1']), np.array(df_data_for_paper['ud2'])
+plt.plot(x_paper, ud1_paper, 'b-', markersize=1)
+plt.plot(x_paper, ud2_paper, 'r-')
+plt.show()
+
+# df = pd.read_csv('/home/aho38/PINNvsFEM/Pytorch-PINN-Marine-Lake/Model_Discovery/synthetic_data/synthetic_data_double_data.csv')
 x_array, mtrue_array, utrue1_array, utrue2_array = np.array(df['x']), np.array(df['mtrue']), np.array(df['utrue1']), np.array(df['utrue2'])
 forcing1_array, forcing2_array, dist_array = np.array(df['g1']), np.array(df['g2']), np.array(df['distribution'])
 u1_noise, u2_noise = np.array(df['u1_noise']), np.array(df['u2_noise'])
@@ -62,6 +68,11 @@ def main(Nu,Nf,layers,noise_level):
     # u_train += torch.randn(u_train.shape) * abs(u_train).max() * noise_level
     u_train1 += u_train1_noise * noise_level
     u_train2 += u_train2_noise * noise_level
+
+    ud1 = torch.tensor(ud1_paper[:,None], dtype=torch.float32)
+    ud2 = torch.tensor(ud2_paper[:,None], dtype=torch.float32)
+    print(u_train1.shape, u_train2.shape)
+    print(ud1.shape, ud2.shape)
 
 
     X_f_train1 = X_f_train2 = torch.tensor(lhs(1, Nf), dtype=torch.float32)
